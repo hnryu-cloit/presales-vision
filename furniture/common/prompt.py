@@ -168,6 +168,7 @@ PRODUCT_DESCRIPTION = """
     }}
     """
 
+
 CHANGE_ATTRIBUTES = """
     주어진 이미지의 특정 속성을 변경하여 새로운 이미지를 생성해주세요.
     변경 요청 사항: {instructions}
