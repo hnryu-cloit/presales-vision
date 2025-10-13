@@ -140,6 +140,19 @@ class Gemini:
         return response.candidates[0].content.parts[0].text
 
 
+    def generate_creative_prompt(self, user_prompt):
+        """
+        사용자 입력을 기반으로 창의적인 프롬프트를 생성합니다.
+
+        Args:
+            user_prompt (str): 사용자가 입력한 프롬프트
+
+        Returns:
+            str: 모델이 생성한 창의적인 프롬프트
+        """
+        prompt = f"""다음은 사용자가 입력한 이미지 생성 프롬프트입니다: '{user_prompt}'. 이 프롬프트를 더 창의적이고 상세하게 만들어주세요. 이미지 생성에 가장 적합한 형태로, 영어로 작성해주세요."""
+        return self.call_gemini_text(prompt)
+
     @retry_with_delay
     def call_image_generator(self, prompt, image_files):
         """
@@ -152,30 +165,26 @@ class Gemini:
         Returns:
             tuple: (생성된 이미지 데이터 리스트, 생성된 텍스트 응답)
         """
-        # 입력 파일이 존재 하는지 확인 합니다.
-        if not image_files:
-            print(f"오류: 입력 이미지 파일을 찾을 수 없습니다.")
-            return [], ""
-
         # 프롬프트와 이미지 파트들을 준비
         parts = [types.Part.from_text(text=prompt)]
 
-        for image_file in image_files:
-            if not os.path.exists(image_file):
-                print(f"오류: 입력 이미지 파일을 찾을 수 없습니다. 경로를 확인해주세요: {image_file}")
-                continue
+        if image_files:
+            for image_file in image_files:
+                if not os.path.exists(image_file):
+                    print(f"오류: 입력 이미지 파일을 찾을 수 없습니다. 경로를 확인해주세요: {image_file}")
+                    continue
 
-            # 입력 이미지 로드
-            try:
-                with open(image_file, "rb") as f:
-                    image_data = f.read()
-                mime_type, _ = mimetypes.guess_type(image_file)
-                if not mime_type:
-                    mime_type = 'application/octet-stream'  # 기본값 설정
-                parts.append(types.Part.from_bytes(data=image_data, mime_type=mime_type))
-            except Exception as e:
-                print(f"이미지 파일 로딩 중 오류 발생: {e}")
-                return [], ""
+                # 입력 이미지 로드
+                try:
+                    with open(image_file, "rb") as f:
+                        image_data = f.read()
+                    mime_type, _ = mimetypes.guess_type(image_file)
+                    if not mime_type:
+                        mime_type = 'application/octet-stream'  # 기본값 설정
+                    parts.append(types.Part.from_bytes(data=image_data, mime_type=mime_type))
+                except Exception as e:
+                    print(f"이미지 파일 로딩 중 오류 발생: {e}")
+                    return [], ""
 
         # 모델에게 전달할 콘텐츠 프롬프트 구성
         contents = [

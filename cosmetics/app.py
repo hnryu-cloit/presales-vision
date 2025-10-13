@@ -1,48 +1,84 @@
 import sys
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLineEdit, QLabel, QTextEdit, QFormLayout, 
-    QGroupBox, QStackedWidget, QFrame, QGridLayout, QFileDialog, QScrollArea, QCheckBox, QMessageBox
+    QPushButton, QLineEdit, QLabel, QTextEdit, QFormLayout,
+    QGroupBox, QStackedWidget, QFrame, QGridLayout, QFileDialog, QScrollArea, QDialog, QMessageBox
 )
 from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer
 
 from common.gemini import Gemini
-from generate import ImageGenerator
+from generate import ImageGenerator, find_image_file
 
 
 class ImageGenerationThread(QThread):
-    """백그라운드에서 이미지 생성을 처리하는 스레드"""
     images_ready = pyqtSignal(list)
+    error_occurred = pyqtSignal(str)
 
-    def __init__(self, gemini_client, prompt, image_files):
+    def __init__(self, generator, mode, **kwargs):
         super().__init__()
-        self.gemini_client = gemini_client
-        self.prompt = prompt
-        self.image_files = image_files
+        self.generator = generator
+        self.mode = mode
+        self.kwargs = kwargs
 
     def run(self):
         try:
-            image_parts, _ = self.gemini_client.call_image_generator(
-                prompt=self.prompt,
-                image_files=self.image_files
-            )
-            self.images_ready.emit(image_parts)
+            if self.mode == "change_attributes":
+                result = self.generator.change_attributes(**self.kwargs)
+            elif self.mode == "create_thumbnail":
+                result = self.generator.create_thumbnail_with_metadata(**self.kwargs)
+            elif self.mode == "apply_style":
+                result = self.generator.apply_style_from_reference(**self.kwargs)
+            elif self.mode == "replace_object":
+                result = self.generator.replace_object_in_reference(**self.kwargs)
+            elif self.mode == "create_scene":
+                result = self.generator.create_beauty_scene(**self.kwargs)
+            else:
+                self.error_occurred.emit(f"Unknown generation mode: {self.mode}")
+                return
+
+            self.images_ready.emit(result)
         except Exception as e:
-            print(f"Image generation failed: {e}")
-            self.images_ready.emit([]) # 실패 시 빈 리스트 전달
+            self.error_occurred.emit(f"An error occurred during image generation: {e}")
 
 
 class AIGeneratorApp(QMainWindow):
+    FEATURE_TOOLTIPS = {
+        "속성 변경": {
+            "short": "촬영 방향, 색상, 조명 등 변경 (제품 형태 유지)",
+            "detail": "촬영 방향, 색상, 조명 등을 자유롭게 수정하면서 제품의 고유한 형태와 디자인은 그대로 유지합니다."
+        },
+        "썸네일 생성": {
+            "short": "상세페이지 분석, 최적화 썸네일 이미지 생성",
+            "detail": "상세페이지 이미지를 분석하여 SNS, 광고에 최적화된 고퀄리티 썸네일을 자동으로 만들어드립니다."
+        },
+        "스타일 적용": {
+            "short": "레퍼런스 이미지의 조명/색감/분위기 복제 적용",
+            "detail": "마음에 드는 이미지의 조명, 색감, 분위기를 분석하여 내 제품에 동일한 스타일을 적용합니다."
+        },
+        "객체 교체": {
+            "short": "레퍼런스 이미지 속 특정 제품을 자사 제품으로 자연스럽게 합성",
+            "detail": "레퍼런스 이미지의 특정 제품 위치에 자사 제품을 자연스럽게 합성합니다. 조명과 그림자까지 자동 조정됩니다."
+        },
+        "뷰티샷 생성": {
+            "short": "여러 제품을 하나의 공간에 배치한 제품 연출 스틸컷 생성",
+            "detail": "여러 제품을 하나의 공간(스튜디오, 화장대, 욕실 등)에 배치한 자연스러운 생활 장면을 만들어드립니다."
+        }
+    }
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Copyright © 2025 ITCEN CLOIT All rights reserved.")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("ITCEN CLOIT")
+        self.setGeometry(100, 100, 900, 800)
 
-        # 전체 애플리케이션 스타일 설정
         self.setStyleSheet("""
             QMainWindow {
                 background: #f8f9fa;
+            }
+            QToolTip {
+                color: #000000;
+                background-color: #ffffff;
+                border: 1px solid black;
             }
         """)
 
@@ -50,20 +86,18 @@ class AIGeneratorApp(QMainWindow):
         self.setCentralWidget(self.main_widget)
         self.main_layout = QHBoxLayout(self.main_widget)
         self.main_layout.setSpacing(0)
-        self.main_layout.setContentsMargins(0,0,0,0)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
 
         self.keyword_widgets = {}
         self.final_prompt = ""
         self.product_image_path = None
         self.gemini_client = Gemini()
         self.image_generator = ImageGenerator()
+        self.generation_mode = None
 
-        # 로딩 애니메이션 설정
         self.loading_text_index = 0
         self.loading_texts = [
-            "AI 모델에 연결하는 중...",
-            "프롬프트 분석 및 이미지 구상 중...",
-            "메인 이미지 생성 중...",
+            "이미지 분석 및 이미지 구상 중...",
             "배경 및 소품 렌더링 중...",
             "최종 결과 조합 중..."
         ]
@@ -75,7 +109,6 @@ class AIGeneratorApp(QMainWindow):
     def init_ui(self):
         self.create_sidebar()
         self.create_main_content_area()
-        
         self.stacked_widget.setCurrentIndex(0)
         self.update_workflow_ui(0)
 
@@ -84,21 +117,20 @@ class AIGeneratorApp(QMainWindow):
         sidebar.setFixedWidth(250)
         sidebar.setStyleSheet("""
             QFrame {
-                background: #343a40;
+                background: #273444;
                 border: none;
-                border-right: 1px solid #dee2e6;
             }
         """)
         sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(20, 30, 20, 30)
-        sidebar_layout.setSpacing(20)
+        sidebar_layout.setContentsMargins(20, 30, 20, 20)
+        sidebar_layout.setSpacing(5)
 
         title_label = QLabel("CEN AI STUDIO")
-        title_label.setFont(QFont("Apple SD Gothic Neo", 18, QFont.Bold))
+        title_label.setFont(QFont("Noto Sans KR", 18, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("""
             QLabel {
-                color: white;
+                color: #FFFFFF;
                 font-weight: bold;
                 margin-bottom: 10px;
                 padding: 10px;
@@ -106,50 +138,58 @@ class AIGeneratorApp(QMainWindow):
         """)
 
         self.sidebar_labels = [
-            QLabel("Step 1: 키워드 입력"),
-            QLabel("Step 2: 프롬프트 검토"),
-            QLabel("Step 3: 이미지 생성"),
+            QLabel("Step 1: 옵션 선택"),
+            QLabel("Step 2: 이미지 생성"),
+            QLabel("Step 3: 이미지 편집"),
             QLabel("Step 4: 결과 확인")
         ]
 
         sidebar_layout.addWidget(title_label)
-        sidebar_layout.addSpacing(30)
+        sidebar_layout.addSpacing(5)
 
         for i, label in enumerate(self.sidebar_labels):
-            label.setFont(QFont("Apple SD Gothic Neo", 12, QFont.Medium))
-            label.setAlignment(Qt.AlignCenter)
+            label.setFont(QFont("Noto Sans KR", 12, QFont.Medium))
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             label.setWordWrap(True)
             label.setStyleSheet("""
                 QLabel {
-                    color: rgba(255, 255, 255, 0.9);
-                    padding: 12px 15px;
+                    color: #A0AEC0;
+                    padding: 6px 15px;
                     border-radius: 6px;
-                    background: rgba(255, 255, 255, 0.05);
-                    margin: 3px 0;
+                    background: transparent;
                     font-weight: 400;
                 }
             """)
             sidebar_layout.addWidget(label)
 
         sidebar_layout.addStretch(1)
+
+        copyright_label = QLabel("Copyright © 2025\nITCEN CLOIT\nAll rights reserved.")
+        copyright_label.setFont(QFont("Noto Sans KR", 11))
+        copyright_label.setAlignment(Qt.AlignCenter)
+        copyright_label.setWordWrap(True)
+        copyright_label.setStyleSheet("""
+            QLabel {
+                color: #8A9EB2;
+                padding: 15px 10px;
+                font-weight: 300;
+            }
+        """)
+        sidebar_layout.addWidget(copyright_label)
         self.main_layout.addWidget(sidebar)
 
     def create_main_content_area(self):
         main_content = QWidget()
-        main_content.setStyleSheet("""
-            QWidget {
-                background: #f8f9fa;
-            }
-        """)
+        main_content.setStyleSheet("background: #f8f9fa;")
         main_content_layout = QVBoxLayout(main_content)
         main_content_layout.setContentsMargins(30, 30, 30, 30)
-        main_content_layout.setSpacing(20)
+        main_content_layout.setSpacing(10)
 
         self.stacked_widget = QStackedWidget()
         self.page1 = self.create_step1_page()
-        self.page2 = self.create_step2_page()
-        self.page3 = self.create_step3_page()
-        self.page4 = self.create_step4_page()
+        self.page2 = self.create_step3_page() # Page 2 is now the loading page
+        self.page3 = self.create_step4_page() # Page 3 is now the editing page
+        self.page4 = self.create_step5_page() # Page 4 is now the results page
         self.stacked_widget.addWidget(self.page1)
         self.stacked_widget.addWidget(self.page2)
         self.stacked_widget.addWidget(self.page3)
@@ -159,7 +199,7 @@ class AIGeneratorApp(QMainWindow):
         nav_layout = QHBoxLayout()
         nav_layout.addStretch(1)
         self.prev_button = QPushButton("← 이전")
-        self.next_button = QPushButton("다음 →")
+        self.next_button = QPushButton("생성 →")
 
         for btn in [self.prev_button, self.next_button]:
             btn.setStyleSheet("""
@@ -171,18 +211,11 @@ class AIGeneratorApp(QMainWindow):
                     padding: 10px 20px;
                     font-size: 13px;
                     font-weight: 500;
-                    min-width: 90px;
+                    min-width: 60px;
                 }
-                QPushButton:hover {
-                    background: #0056b3;
-                }
-                QPushButton:pressed {
-                    background: #004085;
-                }
-                QPushButton:disabled {
-                    background: #6c757d;
-                    color: #dee2e6;
-                }
+                QPushButton:hover { background: #0056b3; }
+                QPushButton:pressed { background: #004085; }
+                QPushButton:disabled { background: #6c757d; color: #dee2e6; }
             """)
 
         self.prev_button.clicked.connect(self.go_to_prev_step)
@@ -191,559 +224,235 @@ class AIGeneratorApp(QMainWindow):
         nav_layout.addSpacing(15)
         nav_layout.addWidget(self.next_button)
         main_content_layout.addLayout(nav_layout)
-
         self.main_layout.addWidget(main_content)
 
     def create_step1_page(self):
-        # 스크롤 영역 생성
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_area.setStyleSheet("QScrollArea { background: transparent; }")
 
         page = QWidget()
-        page.setStyleSheet("""
-            QWidget {
-                background: transparent;
-            }
-        """)
+        page.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 20, 0, 0)
-        layout.setSpacing(25)
+        layout.setContentsMargins(0, 15, 0, 0)
+        layout.setSpacing(18)
 
-        # 페이지 타이틀
-        title = QLabel("AI 이미지 생성 - 키워드 입력")
+        title = QLabel("AI 이미지 생성 옵션")
         title.setStyleSheet("""
             QLabel {
-                font-size: 20px;
-                font-weight: 600;
-                color: #495057;
-                margin-bottom: 15px;
-                padding-bottom: 8px;
-                border-bottom: 2px solid #e9ecef;
+                font-size: 22px; font-weight: 700; color: #212529;
+                margin-bottom: 0px; padding: 0px 0px 10px 0px;
+                border-bottom: 3px solid #007bff;
             }
         """)
         layout.addWidget(title)
 
-        group_box = QGroupBox("생성할 이미지의 핵심 키워드를 입력하세요")
-        group_box.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-                font-weight: 500;
-                font-size: 13px;
-                color: #495057;
-                background: white;
+        # Generation Options
+        options_group = QGroupBox("생성 기능 선택")
+        options_group.setStyleSheet(""" 
+            QGroupBox { 
+                border: 2px solid #e8f5e9; border-radius: 12px; margin-top: 8px;
+                padding: 20px 15px 15px 15px; font-weight: 600; font-size: 14px;
+                color: #2e7d32; background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f9fdf9);
             }
-            QGroupBox::title {
-                background: transparent;
-                padding: 0 8px;
-                color: #495057;
-            }
+            QGroupBox::title { background: transparent; padding: 5px 10px; color: #2e7d32; }
         """)
-        form_layout = QFormLayout()
-        form_layout.setSpacing(15)
+        options_layout = QGridLayout(options_group)
 
-        keywords_to_ask = {
-            "product": "제품"
+        self.option_buttons = {
+            "change_attributes": QPushButton("속성 변경"),
+            "create_thumbnail": QPushButton("썸네일 생성"),
+            "apply_style": QPushButton("스타일 적용"),
+            "replace_object": QPushButton("객체 교체"),
+            "create_scene": QPushButton("뷰티샷 생성")
         }
 
-        # 제품명 입력
-        self.create_input_row("제품명*", "product", form_layout, is_required=True)
-
-        # 주변 사물/소품
-        self.create_input_row("주변 사물/소품", "props", form_layout)
-
-        # 배경/표면
-        self.create_input_row("배경/표면", "background", form_layout)
-
-        # 분위기/조명
-        self.create_input_row("분위기/조명", "mood", form_layout)
-
-        group_box.setLayout(form_layout)
-        layout.addWidget(group_box)
-
-        # 레퍼런스 이미지 섹션 - 다른 섹션과 동일한 스타일
-        ref_group = QGroupBox("레퍼런스 이미지 (선택사항)")
-        ref_group.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-                font-weight: 500;
-                font-size: 13px;
-                color: #495057;
-                background: white;
-            }
-            QGroupBox::title {
-                background: transparent;
-                padding: 0 8px;
-                color: #495057;
-            }
-        """)
-        ref_layout = QVBoxLayout(ref_group)
-
-        # 파일 목록 표시 영역
-        ref_grid_container = QWidget()
-        ref_grid_layout = QVBoxLayout(ref_grid_container)
-        ref_grid_layout.setContentsMargins(0, 0, 0, 0)
-
-        ref_grid_label = QLabel("이미지 등록(최대 5개):")
-        ref_grid_label.setStyleSheet("color: #495057; font-size: 12px; font-weight: 500;")
-        ref_grid_layout.addWidget(ref_grid_label)
-
-        # 스크롤 영역
-        ref_scroll_area = QScrollArea()
-        ref_scroll_area.setFrameShape(QFrame.NoFrame)
-        ref_scroll_area.setWidgetResizable(True)
-        ref_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        ref_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        ref_scroll_area.setFixedHeight(100)
-
-        self.reference_images_widget = QWidget()
-        self.reference_layout = self.create_image_grid_layout()
-        self.reference_images_widget.setLayout(self.reference_layout)
-
-        ref_scroll_area.setWidget(self.reference_images_widget)
-        ref_grid_layout.addWidget(ref_scroll_area)
-
-        ref_layout.addWidget(ref_grid_container)
-        layout.addWidget(ref_group)
-
-        # 속성 설정
-        setattr(self.reference_images_widget, 'image_paths', [])
-        setattr(self.reference_images_widget, 'max_images', 5)
-        self.reference_images = []
-
-        self.update_reference_grid()
-
-        # 옵션 설정 섹션
-        options_group = QGroupBox("생성 옵션")
-        options_group.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-                font-weight: 500;
-                font-size: 13px;
-                color: #495057;
-                background: white;
-            }
-            QGroupBox::title {
-                background: transparent;
-                padding: 0 8px;
-                color: #495057;
-            }
-        """)
-        options_layout = QVBoxLayout(options_group)
-
-        # 옵션 버튼들
-        option_buttons_layout = QHBoxLayout()
-
-        self.btn_style_transfer = QPushButton("🎨 스타일(속성) 변경")
-        self.btn_object_replace = QPushButton("🔄 객체 교체")
-        self.btn_scene_create = QPushButton("❤️ 썸네일 생성")
-        self.btn_custom_prompt = QPushButton("✏️ 기타 사용자 입력")
-
-        option_buttons = [self.btn_style_transfer, self.btn_object_replace, self.btn_scene_create, self.btn_custom_prompt]
-        for btn in option_buttons:
+        positions = [(i, j) for i in range(2) for j in range(3)]
+        for (i, j), (mode, btn) in zip(positions, self.option_buttons.items()):
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #e9ecef;
-                    color: #495057;
-                    border: 1px solid #ced4da;
-                    border-radius: 4px;
-                    padding: 6px 12px;
-                    font-size: 11px;
-                    font-weight: 500;
-                    min-width: 80px;
+                    background: white; color: #495057; border: 2px solid #dee2e6; border-radius: 10px;
+                    padding: 12px 18px; font-size: 13px; font-weight: 600; min-width: 120px;
                 }
-                QPushButton:hover {
-                    background: #dee2e6;
-                }
-                QPushButton:checked {
-                    background: #007bff;
-                    color: white;
-                    border-color: #007bff;
+                QPushButton:hover { background: #f8f9fa; border-color: #007bff; }
+                QPushButton:checked { 
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                    color: white; border-color: #667eea;
                 }
             """)
             btn.setCheckable(True)
-            option_buttons_layout.addWidget(btn)
+            btn.clicked.connect(lambda checked, m=mode: self.set_generation_mode(m))
+            
+            btn_text = btn.text()
+            if btn_text in self.FEATURE_TOOLTIPS:
+                btn.setToolTip(self.FEATURE_TOOLTIPS[btn_text]["detail"])
 
-        self.btn_custom_prompt.clicked.connect(self.toggle_custom_prompt)
-        option_buttons_layout.addStretch()
+            options_layout.addWidget(btn, i, j)
 
-        # 커스텀 프롬프트 입력 영역
-        self.custom_prompt_widget = QWidget()
-        custom_prompt_layout = QVBoxLayout(self.custom_prompt_widget)
-        custom_prompt_layout.setContentsMargins(0, 10, 0, 0)
-
-        custom_label = QLabel("사용자 정의 프롬프트:")
-        custom_label.setStyleSheet("color: #495057; font-weight: 500;")
-
-        self.custom_prompt_input = QTextEdit()
-        self.custom_prompt_input.setFixedHeight(80)
-        self.custom_prompt_input.setPlaceholderText("원하는 이미지 생성 프롬프트를 직접 입력하세요...")
-        self.custom_prompt_input.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 12px;
-                background: white;
-            }
-            QTextEdit:focus {
-                border-color: #007bff;
-                outline: none;
-            }
-        """)
-
-        custom_prompt_layout.addWidget(custom_label)
-        custom_prompt_layout.addWidget(self.custom_prompt_input)
-        self.custom_prompt_widget.setVisible(False)
-
-        options_layout.addLayout(option_buttons_layout)
-        options_layout.addWidget(self.custom_prompt_widget)
         layout.addWidget(options_group)
 
-        layout.addStretch(1)
+        # Dynamic Options Area
+        self.dynamic_options_widget = QWidget()
+        self.dynamic_options_layout = QVBoxLayout(self.dynamic_options_widget)
+        self.dynamic_options_layout.setContentsMargins(0,0,0,0)
+        layout.addWidget(self.dynamic_options_widget)
 
-        # 스크롤 영역에 페이지 설정
+        layout.addStretch(1)
         scroll_area.setWidget(page)
         return scroll_area
 
-    def create_step2_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 20, 0, 0)
-        layout.setSpacing(25)
+    def set_generation_mode(self, mode):
+        self.generation_mode = mode
+        for m, btn in self.option_buttons.items():
+            if m != mode:
+                btn.setChecked(False)
+        self.update_dynamic_options()
 
-        # 페이지 타이틀
-        title = QLabel("AI 이미지 생성 - 프롬프트 검토")
-        title.setStyleSheet("""
-            QLabel {
-                font-size: 20px;
-                font-weight: 600;
-                color: #495057;
-                margin-bottom: 15px;
-                padding-bottom: 8px;
-                border-bottom: 2px solid #e9ecef;
-            }
-        """)
-        layout.addWidget(title)
+    def update_dynamic_options(self):
+        # Clear previous dynamic widgets
+        while self.dynamic_options_layout.count():
+            child = self.dynamic_options_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
-        group_box = QGroupBox("AI가 생성한 프롬프트")
+        if self.generation_mode is None:
+            return
+
+        # Main Product Image
+        self.main_product_group = self.create_image_input_group(
+            "메인 상품 이미지", "main_product", 
+            max_images=1 if self.generation_mode != 'create_scene' else 5
+        )
+        self.dynamic_options_layout.addWidget(self.main_product_group)
+
+        # Reference Image (if applicable)
+        if self.generation_mode in ['apply_style', 'replace_object', 'create_thumbnail']:
+            self.reference_group = self.create_image_input_group("레퍼런스 이미지", "reference", max_images=5)
+            self.dynamic_options_layout.addWidget(self.reference_group)
+
+        # Instructions (if applicable)
+        if self.generation_mode == 'change_attributes':
+            self.instructions_group = QGroupBox("변경 지시사항")
+            self.instructions_layout = QVBoxLayout(self.instructions_group)
+            self.instructions_input = QTextEdit()
+            self.instructions_input.setPlaceholderText("예: 제품을 우측 컷으로 변경해주세요.")
+            self.instructions_layout.addWidget(self.instructions_input)
+            self.dynamic_options_layout.addWidget(self.instructions_group)
+
+    def create_image_input_group(self, title, key, max_images=3):
+        group_box = QGroupBox(title)
         group_box.setStyleSheet("""
             QGroupBox {
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-                font-weight: 500;
-                font-size: 13px;
-                color: #495057;
-                background: white;
-            }
-            QGroupBox::title {
-                background: transparent;
-                padding: 0 8px;
-                color: #495057;
-            }
-        """)
-        group_layout = QVBoxLayout(group_box)
-
-        self.prompt_editor = QTextEdit()
-        self.prompt_editor.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                padding: 12px;
-                font-size: 12px;
-                font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
-                background: white;
-                line-height: 1.4;
-            }
-            QTextEdit:focus {
-                border-color: #007bff;
-                outline: none;
-            }
-        """)
-        self.prompt_editor.setMinimumHeight(200)
-
-        group_layout.addWidget(self.prompt_editor)
-        layout.addWidget(group_box)
-        layout.addStretch(1)
-        return page
-
-    def create_step3_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 20, 0, 0)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(30)
-
-        # 로딩 아이콘 영역
-        loading_container = QWidget()
-        loading_container.setFixedSize(150, 150)
-        loading_container.setStyleSheet("""
-            QWidget {
-                background: #6c757d;
-                border-radius: 75px;
-            }
-        """)
-
-        loading_layout = QVBoxLayout(loading_container)
-        loading_icon = QLabel("⏳")
-        loading_icon.setAlignment(Qt.AlignCenter)
-        loading_icon.setStyleSheet("""
-            QLabel {
-                background: transparent;
-                font-size: 40px;
-                color: white;
-            }
-        """)
-        loading_layout.addWidget(loading_icon)
-
-        self.status_label = QLabel("AI가 이미지를 생성하고 있습니다...")
-        self.status_label.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: 500;
-                color: #495057;
-                text-align: center;
-                padding: 15px;
-                background: white;
-                border-radius: 6px;
-                border: 1px solid #dee2e6;
-            }
-        """)
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setWordWrap(True)
-
-        layout.addWidget(loading_container, 0, Qt.AlignCenter)
-        layout.addWidget(self.status_label)
-        layout.addStretch(1)
-        return page
-
-    def create_step4_page(self):
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 20, 0, 0)
-        layout.setSpacing(25)
-
-        # 페이지 타이틀
-        title = QLabel("AI 이미지 생성 - 결과 확인")
-        title.setStyleSheet("""
-            QLabel {
-                font-size: 20px;
+                border: 2px solid #e3f2fd;
+                border-radius: 12px;
+                margin-top: 8px;
+                padding: 20px 15px 15px 15px;
                 font-weight: 600;
-                color: #495057;
-                margin-bottom: 15px;
-                padding-bottom: 8px;
-                border-bottom: 2px solid #e9ecef;
-            }
-        """)
-        layout.addWidget(title)
-
-        group = QGroupBox("생성된 이미지 결과")
-        group.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #dee2e6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-                font-weight: 500;
-                font-size: 13px;
-                color: #495057;
-                background: white;
+                font-size: 14px;
+                color: #1976d2;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8fbff);
             }
             QGroupBox::title {
                 background: transparent;
-                padding: 0 8px;
-                color: #495057;
-            }
-        """)
-        self.grid_layout = QGridLayout(group)
-        self.grid_layout.setSpacing(20)
-        layout.addWidget(group)
-        layout.addStretch(1)
-        return page
-
-    def create_input_row(self, title, key, form_layout, is_required=False):
-        """단순화된 입력 행 생성"""
-        
-        title_label = QLabel(title)
-        if is_required:
-            title_label.setStyleSheet("color: red; font-weight: bold;")
-
-        container_widget = QWidget()
-        main_layout = QVBoxLayout(container_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(10)
-
-        # 입력란
-        line_edit = QLineEdit()
-        line_edit.setStyleSheet("""
-            QLineEdit {
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                padding: 8px 12px;
-                font-size: 12px;
-                background: white;
-            }
-            QLineEdit:focus {
-                border-color: #007bff;
-                outline: none;
+                padding: 5px 10px;
+                color: #1976d2;
             }
         """)
 
-        # 파일 목록 표시 영역
-        grid_container = QWidget()
-        grid_layout = QVBoxLayout(grid_container)
-        grid_layout.setContentsMargins(0, 0, 0, 0)
+        layout = QVBoxLayout(group_box)
 
-        grid_label = QLabel(f"이미지 등록(최대 3개):")
-        grid_label.setStyleSheet("color: #495057; font-size: 12px; font-weight: 500;")
-        grid_layout.addWidget(grid_label)
-
-        # 스크롤 영역
         scroll_area = QScrollArea()
         scroll_area.setFrameShape(QFrame.NoFrame)
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_area.setFixedHeight(100)
+        scroll_area.setFixedHeight(110)
 
         image_grid_widget = QWidget()
         image_grid_layout = self.create_image_grid_layout()
         image_grid_widget.setLayout(image_grid_layout)
-
         scroll_area.setWidget(image_grid_widget)
-        grid_layout.addWidget(scroll_area)
+        layout.addWidget(scroll_area)
 
-        main_layout.addWidget(line_edit)
-        main_layout.addWidget(grid_container)
-
-        form_layout.addRow(title_label, container_widget)
-
-        # 속성 설정
         setattr(image_grid_widget, 'image_paths', [])
-        setattr(image_grid_widget, 'max_images', 3)
-        setattr(image_grid_widget, 'input_widget', line_edit)
-
-        # 위젯 저장
-        self.keyword_widgets[key] = line_edit
-        if not hasattr(self, 'file_widgets'):
-            self.file_widgets = {}
-        self.file_widgets[key] = image_grid_widget
+        setattr(image_grid_widget, 'max_images', max_images)
+        setattr(group_box, 'grid_widget', image_grid_widget)
 
         self.update_image_grid(image_grid_widget)
-
-        return image_grid_widget
-
+        return group_box
+    
     def create_image_grid_layout(self):
-        """이미지 그리드 레이아웃 생성"""
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        layout.setSpacing(10)
         layout.addStretch()
         return layout
 
     def create_image_card(self, image_path, grid_widget):
-        """이미지 카드 생성"""
         card = QWidget()
-        card.setFixedSize(80, 80)
+        card.setFixedSize(96, 96)
         card.setStyleSheet("""
             QWidget {
-                border: 2px solid #DDD;
-                border-radius: 5px;
+                border: 2px solid #e9ecef;
+                border-radius: 8px;
                 background-color: white;
             }
             QWidget:hover {
-                border-color: #A23B72;
+                border-color: #667eea;
             }
         """)
-
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(0)
+        layout.setContentsMargins(3, 3, 3, 3)
 
         img_label = QLabel()
-        img_label.setFixedSize(76, 76)
+        pixmap = QPixmap(image_path)
+        scaled_pixmap = pixmap.scaled(90, 90, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        img_label.setPixmap(scaled_pixmap)
         img_label.setAlignment(Qt.AlignCenter)
-        img_label.setStyleSheet("border: none; background-color: #F8F8F8;")
         layout.addWidget(img_label)
 
-        pixmap = QPixmap(image_path)
-        if not pixmap.isNull():
-            scaled_pixmap = pixmap.scaled(img_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            img_label.setPixmap(scaled_pixmap)
-        else:
-            img_label.setText("이미지\n오류")
-            img_label.setStyleSheet("border: none; background-color: #F8F8F8; color: #D00; font-size: 10px;")
-
-        # 삭제 버튼
         delete_btn = QPushButton("✕", card)
-        delete_btn.setFixedSize(20, 20)
-        delete_btn.move(img_label.width() - delete_btn.width() - 2, 2)
-        delete_btn.setToolTip("이미지 삭제")
+        delete_btn.setFixedSize(22, 22)
+        delete_btn.move(card.width() - delete_btn.width() - 1, 1)
         delete_btn.setStyleSheet("""
             QPushButton {
                 border: none;
-                background-color: rgba(255, 0, 0, 0.8);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f857a6, stop:1 #ff5858);
                 color: white;
                 font-weight: bold;
                 font-size: 12px;
-                border-radius: 10px;
+                border-radius: 11px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 0, 0, 1.0);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff5858, stop:1 #f857a6);
             }
         """)
         delete_btn.clicked.connect(lambda: self.remove_image_card(image_path, grid_widget))
-
         return card
 
     def create_add_button(self, grid_widget):
-        """추가 버튼 생성"""
         add_card = QWidget()
-        add_card.setFixedSize(80, 80)
+        add_card.setFixedSize(96, 96)
         add_card.setStyleSheet("""
-            QWidget {
-                border: 2px dashed #AAA;
-                border-radius: 5px;
-                background-color: #F8F8F8;
+            QWidget { 
+                border: 2px dashed #adb5bd; border-radius: 8px; 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f9fa);
             }
-            QWidget:hover {
-                border-color: #A23B72;
-                background-color: #F0F0F0;
+            QWidget:hover { 
+                border-color: #667eea; 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f8f9ff, stop:1 #e9ecff);
             }
         """)
-
         layout = QVBoxLayout(add_card)
-        layout.setContentsMargins(0, 0, 0, 0)
-
         add_label = QLabel("+")
         add_label.setAlignment(Qt.AlignCenter)
-        add_label.setStyleSheet("""
-            border: none;
-            background-color: transparent;
-            color: #888;
-            font-size: 24px;
-            font-weight: bold;
-        """)
-
-        add_card.mousePressEvent = lambda event: self.add_images_to_grid(grid_widget)
+        add_label.setStyleSheet("border: none; background-color: transparent; color: #667eea; font-size: 28px; font-weight: bold;")
         layout.addWidget(add_label)
-
+        add_card.mousePressEvent = lambda event: self.add_images_to_grid(grid_widget)
         return add_card
 
     def add_images_to_grid(self, grid_widget):
-        """그리드에 이미지 추가"""
         max_images = getattr(grid_widget, 'max_images', 3)
         files, _ = QFileDialog.getOpenFileNames(self, "이미지 선택", "", "Image files (*.png *.jpg *.jpeg)")
         if files:
@@ -756,314 +465,195 @@ class AIGeneratorApp(QMainWindow):
                 files = files[:available_slots]
                 QMessageBox.information(self, "일부 파일 선택", f"최대 개수 제한으로 {available_slots}개 파일만 선택되었습니다.")
             grid_widget.image_paths.extend(files)
-
         self.update_image_grid(grid_widget)
 
     def remove_image_card(self, image_path, grid_widget):
-        """이미지 카드 제거"""
         if image_path in grid_widget.image_paths:
             grid_widget.image_paths.remove(image_path)
             self.update_image_grid(grid_widget)
 
     def update_image_grid(self, grid_widget):
-        """이미지 그리드 업데이트"""
         layout = grid_widget.layout()
         max_images = getattr(grid_widget, 'max_images', 3)
 
-        # 기존 위젯 제거
+        # Clear all items from the layout
         while layout.count():
             child = layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        # 이미지 카드 추가
         for image_path in grid_widget.image_paths:
             card = self.create_image_card(image_path, grid_widget)
             layout.addWidget(card)
 
-        # 추가 버튼 (최대 개수 미만인 경우만)
         if len(grid_widget.image_paths) < max_images:
             add_btn = self.create_add_button(grid_widget)
             layout.addWidget(add_btn)
 
         layout.addStretch()
 
-    def update_reference_grid(self):
-        """레퍼런스 이미지 그리드 업데이트"""
-        layout = self.reference_layout
-        max_images = getattr(self.reference_images_widget, 'max_images', 5)
-
-        # 기존 위젯 제거
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-        # reference_images를 reference_images_widget.image_paths에 동기화
-        self.reference_images_widget.image_paths = self.reference_images.copy()
-
-        # 이미지 카드 추가
-        for image_path in self.reference_images_widget.image_paths:
-            card = self.create_image_card(image_path, self.reference_images_widget)
-            layout.addWidget(card)
-
-        # 추가 버튼 (최대 개수 미만인 경우만)
-        if len(self.reference_images_widget.image_paths) < max_images:
-            add_btn = self.create_add_button(self.reference_images_widget)
-            layout.addWidget(add_btn)
-
-        layout.addStretch()
-
-    def show_image_popup(self, image_path):
-        """이미지 팝업창 표시"""
 
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle("이미지 미리보기")
-        dialog.setFixedSize(600, 600)
 
-        layout = QVBoxLayout(dialog)
 
-        img_label = QLabel()
-        img_label.setAlignment(Qt.AlignCenter)
+    def create_step3_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setAlignment(Qt.AlignCenter)
+        self.status_label = QLabel("AI가 이미지를 생성하고 있습니다...")
+        self.status_label.setStyleSheet("font-size: 16px; font-weight: 500; color: #495057;")
+        layout.addWidget(self.status_label)
+        return page
 
-        pixmap = QPixmap(image_path)
-        if not pixmap.isNull():
-            scaled_pixmap = pixmap.scaled(550, 550, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            img_label.setPixmap(scaled_pixmap)
-        else:
-            img_label.setText("이미지를 불러올 수 없습니다")
+    def create_step4_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        title = QLabel("Step 3: 이미지 편집")
+        layout.addWidget(title)
+        # Add image editing widgets here later
+        return page
 
-        layout.addWidget(img_label)
-        dialog.exec_()
-
-    def select_image(self):
-        file_name, _ = QFileDialog.getOpenFileName(self, "이미지 선택", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
-        if file_name:
-            self.product_image_path = file_name
-            self.lbl_image_path.setText(file_name.split('/')[-1])
-            self.lbl_image_path.setStyleSheet("""
-                QLabel {
-                    color: #155724;
-                    font-size: 12px;
-                    font-weight: 500;
-                    padding: 10px;
-                    background: #d4edda;
-                    border-radius: 4px;
-                    border: 1px solid #c3e6cb;
-                }
-            """)
-
-            # 이미지 미리보기 표시
-            pixmap = QPixmap(file_name)
-            if not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(self.image_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.image_preview.setPixmap(scaled_pixmap)
-                self.image_preview.setStyleSheet("""
-                    QLabel {
-                        border: 2px solid #28a745;
-                        border-radius: 8px;
-                        background: white;
-                    }
-                """)
-
-    def add_reference_images(self):
-        """레퍼런스 이미지 추가"""
-        files, _ = QFileDialog.getOpenFileNames(self, "레퍼런스 이미지 선택", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
-        if files:
-            for file_path in files:
-                if file_path not in self.reference_images:
-                    self.reference_images.append(file_path)
-                    self.add_reference_thumbnail(file_path)
-
-    def add_reference_thumbnail(self, image_path):
-        """레퍼런스 이미지 썸네일 추가"""
-        thumbnail_widget = QWidget()
-        thumbnail_widget.setFixedSize(80, 80)
-        thumbnail_widget.setStyleSheet("""
-            QWidget {
-                border: 2px solid #DDD;
-                border-radius: 5px;
-                background: white;
-            }
-            QWidget:hover {
-                border-color: #A23B72;
-            }
-        """)
-
-        layout = QVBoxLayout(thumbnail_widget)
-        layout.setContentsMargins(2, 2, 2, 2)
-
-        img_label = QLabel()
-        img_label.setFixedSize(76, 76)
-        img_label.setAlignment(Qt.AlignCenter)
-        img_label.setStyleSheet("border: none; background-color: #F8F8F8;")
-
-        pixmap = QPixmap(image_path)
-        if not pixmap.isNull():
-            scaled_pixmap = pixmap.scaled(img_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            img_label.setPixmap(scaled_pixmap)
-        else:
-            img_label.setText("이미지\n오류")
-            img_label.setStyleSheet("border: none; background-color: #F8F8F8; color: #D00; font-size: 10px;")
-
-        # 미리보기 버튼
-        preview_btn = QPushButton("👁", thumbnail_widget)
-        preview_btn.setFixedSize(20, 20)
-        preview_btn.move(2, 2)
-        preview_btn.setToolTip("미리보기")
-        preview_btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background-color: rgba(0, 123, 255, 0.8);
-                color: white;
-                font-weight: bold;
-                font-size: 12px;
-                border-radius: 10px;
-            }
-            QPushButton:hover {
-                background-color: rgba(0, 123, 255, 1.0);
-            }
-        """)
-        preview_btn.clicked.connect(lambda: self.show_image_popup(image_path))
-
-        # 삭제 버튼
-        del_btn = QPushButton("✕", thumbnail_widget)
-        del_btn.setFixedSize(20, 20)
-        del_btn.move(img_label.width() - del_btn.width() - 2, 2)
-        del_btn.setToolTip("이미지 삭제")
-        del_btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background-color: rgba(255, 0, 0, 0.8);
-                color: white;
-                font-weight: bold;
-                font-size: 12px;
-                border-radius: 10px;
-            }
-            QPushButton:hover {
-                background-color: rgba(255, 0, 0, 1.0);
-            }
-        """)
-        del_btn.clicked.connect(lambda: self.remove_reference_image(image_path, thumbnail_widget))
-
-        layout.addWidget(img_label)
-        self.reference_layout.addWidget(thumbnail_widget)
-
-    def remove_reference_image(self, image_path, widget):
-        """레퍼런스 이미지 제거"""
-        if image_path in self.reference_images:
-            self.reference_images.remove(image_path)
-        widget.deleteLater()
-
-    def toggle_custom_prompt(self):
-        """커스텀 프롬프트 입력 영역 토글"""
-        if self.btn_custom_prompt.isChecked():
-            self.custom_prompt_widget.setVisible(True)
-            # 다른 옵션 버튼들 해제
-            self.btn_style_transfer.setChecked(False)
-            self.btn_object_replace.setChecked(False)
-            self.btn_scene_create.setChecked(False)
-        else:
-            self.custom_prompt_widget.setVisible(False)
+    def create_step5_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        title = QLabel("AI 이미지 생성 - 결과 확인")
+        title.setStyleSheet("font-size: 20px; font-weight: 600; color: #495057;")
+        layout.addWidget(title)
+        group = QGroupBox("생성된 이미지 결과")
+        self.grid_layout = QGridLayout(group)
+        layout.addWidget(group)
+        return page
 
     def update_workflow_ui(self, step_index):
         for i, label in enumerate(self.sidebar_labels):
-            if i == step_index:
-                label.setStyleSheet("""
-                    QLabel {
-                        color: white;
-                        padding: 12px 15px;
-                        border-radius: 6px;
-                        background: rgba(255, 255, 255, 0.2);
-                        margin: 3px 0;
-                        font-weight: 500;
-                        border-left: 3px solid #007bff;
-                    }
-                """)
-            elif i < step_index:
-                label.setStyleSheet("""
-                    QLabel {
-                        color: rgba(255, 255, 255, 0.8);
-                        padding: 12px 15px;
-                        border-radius: 6px;
-                        background: rgba(255, 255, 255, 0.1);
-                        margin: 3px 0;
-                        font-weight: 400;
-                        border-left: 3px solid #28a745;
-                    }
-                """)
+            is_current = (i == step_index)
+            is_done = (i < step_index)
+            if is_current:
+                style = "color: white; background: rgba(255, 255, 255, 0.2); border-left: 3px solid #007bff;"
+            elif is_done:
+                style = "color: rgba(255, 255, 255, 0.8); background: rgba(255, 255, 255, 0.1); border-left: 3px solid #28a745;"
             else:
-                label.setStyleSheet("""
-                    QLabel {
-                        color: rgba(255, 255, 255, 0.6);
-                        padding: 12px 15px;
-                        border-radius: 6px;
-                        background: rgba(255, 255, 255, 0.05);
-                        margin: 3px 0;
-                        font-weight: 400;
-                    }
-                """)
+                style = "color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.05);"
+
+            label.setStyleSheet(f"""
+                QLabel {{
+                    padding: 12px 15px;
+                    border-radius: 6px;
+                    margin: 3px 0;
+                    font-weight: {500 if is_current else 400};
+                    {style}
+                }}
+            """)
 
         self.prev_button.setEnabled(step_index > 0)
         self.next_button.setEnabled(step_index < self.stacked_widget.count() - 1)
-
-        if step_index == self.stacked_widget.count() - 1:
-            self.next_button.setText("✓ 완료")
+        
+        if step_index == 0:
+            self.next_button.setText("생성 →")
+        elif step_index == 2: # Editor page
+            self.next_button.setText("결과 확인 →")
+        elif step_index == self.stacked_widget.count() - 1: # Results page
+            self.next_button.setText("다시하기")
         else:
             self.next_button.setText("다음 →")
 
     def go_to_next_step(self):
         current_index = self.stacked_widget.currentIndex()
+        if current_index == self.stacked_widget.count() - 1:
+            self.stacked_widget.setCurrentIndex(0)
+            self.update_workflow_ui(0)
+            return
 
         if current_index == 0:
-            if not self.file_widgets['product'].image_paths:
-                QMessageBox.warning(self, "이미지 필요", "제품 이미지를 선택해야 다음 단계로 진행할 수 있습니다.")
+            if not self.generation_mode:
+                QMessageBox.warning(self, "오류", "생성 기능을 선택해주세요.")
                 return
-            keywords = {key: widget.text() for key, widget in self.keyword_widgets.items()}
-            generated_prompt = self.generate_prompt_with_ai(keywords)
-            self.prompt_editor.setText(generated_prompt)
-
-        elif current_index == 1:
-            self.final_prompt = self.prompt_editor.toPlainText()
-            self.stacked_widget.setCurrentIndex(2)
-            self.update_workflow_ui(2)
-
-            # 선택된 생성 옵션에 따라 이미지 파일 목록 구성
-            generation_mode = "basic"
-            if self.btn_style_transfer.isChecked():
-                generation_mode = "style_transfer"
-            elif self.btn_object_replace.isChecked():
-                generation_mode = "object_replace"
-            elif self.btn_scene_create.isChecked():
-                generation_mode = "scene_create"
-
-            image_files = []
-            main_product_images = self.file_widgets['product'].image_paths
-            reference_images = self.reference_images_widget.image_paths
-
-            if generation_mode in ["style_transfer", "object_replace"]:
-                image_files.extend(main_product_images)
-                image_files.extend(reference_images)
-            elif generation_mode == "scene_create":
-                for key, widget in self.file_widgets.items():
-                    image_files.extend(widget.image_paths)
-            else: # basic or custom
-                image_files.extend(main_product_images)
-
-            self.image_thread = ImageGenerationThread(self.gemini_client, self.final_prompt, image_files)
-            self.image_thread.images_ready.connect(self.on_images_ready)
-            self.image_thread.finished.connect(self.image_thread.deleteLater)
             
+            main_images = self.main_product_group.grid_widget.image_paths
+            if not main_images:
+                QMessageBox.warning(self, "오류", "메인 상품 이미지를 추가해주세요.")
+                return
+
+            if self.generation_mode == 'change_attributes':
+                if not self.instructions_input.toPlainText().strip():
+                    QMessageBox.warning(self, "오류", "변경 지시사항을 입력해주세요.")
+                    return
+            
+            if self.generation_mode in ['apply_style', 'replace_object']:
+                if hasattr(self, 'reference_group'):
+                    ref_images = self.reference_group.grid_widget.image_paths
+                    if not ref_images:
+                        QMessageBox.warning(self, "오류", "레퍼런스 이미지를 추가해주세요.")
+                        return
+                else:
+                    QMessageBox.warning(self, "오류", "레퍼런스 이미지를 추가해주세요.")
+                    return
+
+            # Start generation immediately
+            kwargs = {}
+            if self.generation_mode == 'change_attributes':
+                kwargs['image_path'] = main_images[0]
+                kwargs['instructions'] = self.instructions_input.toPlainText().strip().split('\n')
+            elif self.generation_mode == 'create_thumbnail':
+                kwargs['image_path'] = main_images[0]
+                if hasattr(self, 'reference_group'):
+                    kwargs['reference_image_path'] = self.reference_group.grid_widget.image_paths
+            elif self.generation_mode == 'apply_style':
+                kwargs['product_image_path'] = main_images[0]
+                kwargs['reference_image_path'] = self.reference_group.grid_widget.image_paths
+            elif self.generation_mode == 'replace_object':
+                kwargs['product_image_path'] = main_images[0]
+                kwargs['reference_image_path'] = self.reference_group.grid_widget.image_paths
+            elif self.generation_mode == 'create_scene':
+                kwargs['product_image_paths'] = main_images
+
+            self.stacked_widget.setCurrentIndex(1) # Go to loading page
+            self.update_workflow_ui(1)
+
+            self.image_thread = ImageGenerationThread(self.image_generator, self.generation_mode, **kwargs)
+            self.image_thread.images_ready.connect(self.on_images_ready)
+            self.image_thread.error_occurred.connect(self.on_generation_error)
+            self.image_thread.finished.connect(self.image_thread.deleteLater)
+
             self.loading_text_index = 0
             self.update_loading_animation()
-            self.animation_timer.start(2000) # 2초마다 텍스트 변경
+            self.animation_timer.start(1500)
             self.image_thread.start()
-            return # 스레드 시작 후 UI는 대기 
 
-        if current_index < self.stacked_widget.count() - 1:
-            self.stacked_widget.setCurrentIndex(current_index + 1)
-            self.update_workflow_ui(current_index + 1)
+        elif current_index == 1:
+            # This is the loading page, button should be disabled.
+            pass
+
+        elif current_index == 2:
+            # 편집 페이지에서 결과 페이지로
+            # 모든 생성된 이미지를 결과 페이지에 표시
+            while self.grid_layout.count():
+                child = self.grid_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+            if hasattr(self, 'all_generated_images') and self.all_generated_images:
+                for i, image_path in enumerate(self.all_generated_images):
+                    pixmap = QPixmap(image_path)
+                    image_container = QWidget()
+                    container_layout = QVBoxLayout(image_container)
+                    image_label = QLabel()
+                    image_label.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                    image_label.setAlignment(Qt.AlignCenter)
+                    number_label = QLabel(f"결과 {i + 1}")
+                    number_label.setAlignment(Qt.AlignCenter)
+                    container_layout.addWidget(image_label)
+                    container_layout.addWidget(number_label)
+                    row, col = i // 3, i % 3
+                    self.grid_layout.addWidget(image_container, row, col)
+            
+            self.stacked_widget.setCurrentIndex(3)
+            self.update_workflow_ui(3)
+
+        elif current_index == 3:
+            # 결과 페이지에서 다시하기
+            self.stacked_widget.setCurrentIndex(0)
+            self.update_workflow_ui(0)
 
     def go_to_prev_step(self):
         current_index = self.stacked_widget.currentIndex()
@@ -1071,111 +661,60 @@ class AIGeneratorApp(QMainWindow):
             self.stacked_widget.setCurrentIndex(current_index - 1)
             self.update_workflow_ui(current_index - 1)
 
-    def generate_prompt_with_ai(self, keywords):
-        # 커스텀 프롬프트가 선택되고 입력된 경우
-        if self.btn_custom_prompt.isChecked() and self.custom_prompt_input.toPlainText().strip():
-            return self.custom_prompt_input.toPlainText().strip()
-
-        # 선택된 생성 옵션 확인
-        generation_mode = "basic"
-        if self.btn_style_transfer.isChecked():
-            generation_mode = "style_transfer"
-        elif self.btn_object_replace.isChecked():
-            generation_mode = "object_replace"
-        elif self.btn_scene_create.isChecked():
-            generation_mode = "scene_create"
-
-        # image_generator를 사용하여 프롬프트 생성
-        generated_prompt = self.image_generator.create_prompt(generation_mode, keywords)
-        return generated_prompt
-
     def update_loading_animation(self):
         self.status_label.setText(self.loading_texts[self.loading_text_index])
         self.loading_text_index = (self.loading_text_index + 1) % len(self.loading_texts)
 
-    @pyqtSlot(list)
-    def on_images_ready(self, image_parts):
+    @pyqtSlot(str)
+    def on_generation_error(self, error_message):
         self.animation_timer.stop()
+        QMessageBox.critical(self, "Generation Error", error_message)
+        self.go_to_prev_step()
+
+    @pyqtSlot(list)
+    def on_images_ready(self, saved_image_paths):
+        self.animation_timer.stop()
+
+        if not saved_image_paths:
+            QMessageBox.warning(self, "오류", "생성된 이미지가 없습니다.")
+            self.go_to_prev_step()
+            return
+
+        # 첫 번째 생성된 이미지를 편집 페이지에 로드
+        self.generated_image_path = saved_image_paths[0]
         
-        # Clear previous images
-        while self.grid_layout.count():
-            child = self.grid_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-        # Display new images
-        for i, image_data in enumerate(image_parts):
-            pixmap = QPixmap()
-            pixmap.loadFromData(image_data.data)
-
-            # 이미지 컨테이너
-            image_container = QWidget()
-            image_container.setStyleSheet("""
-                QWidget {
-                    background: white;
-                    border: 1px solid #dee2e6;
-                    border-radius: 8px;
-                    padding: 8px;
-                }
-                QWidget:hover {
-                    border-color: #007bff;
-                    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.2);
-                }
-            """)
-            container_layout = QVBoxLayout(image_container)
-            container_layout.setContentsMargins(8, 8, 8, 8)
-
-            image_label = QLabel()
-            image_label.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            image_label.setAlignment(Qt.AlignCenter)
-            image_label.setStyleSheet("""
-                QLabel {
-                    border: 1px solid #e9ecef;
-                    border-radius: 4px;
-                    background: #f8f9fa;
-                }
-            """)
-
-            # 이미지 번호 라벨
-            number_label = QLabel(f"결과 {i+1}")
-            number_label.setAlignment(Qt.AlignCenter)
-            number_label.setStyleSheet("""
-                QLabel {
-                    font-weight: 500;
-                    color: #6c757d;
-                    margin-top: 6px;
-                    border: none;
-                    background: transparent;
-                    font-size: 12px;
-                }
-            """)
-
-            container_layout.addWidget(image_label)
-            container_layout.addWidget(number_label)
-
-            row = i // 2
-            col = i % 2
-            self.grid_layout.addWidget(image_container, row, col)
-
-        self.stacked_widget.setCurrentIndex(3)
-        self.update_workflow_ui(3)
+        # Step 3 페이지(편집 페이지)에 AiEditorWidget이 없다면 추가
+        if not hasattr(self, 'editor_widget'):
+            from editor import AiEditorWidget
+            
+            # 기존 page3 제거
+            old_page3 = self.stacked_widget.widget(2)
+            self.stacked_widget.removeWidget(old_page3)
+            old_page3.deleteLater()
+            
+            # AiEditorWidget 추가
+            self.editor_widget = AiEditorWidget(self)
+            self.stacked_widget.insertWidget(2, self.editor_widget)
+        
+        # 생성된 이미지를 편집기에 로드
+        self.editor_widget.load_image(self.generated_image_path)
+        
+        # 모든 생성된 이미지 경로 저장 (나중에 결과 페이지에서 사용)
+        self.all_generated_images = saved_image_paths
+        
+        # 편집 페이지로 이동
+        self.stacked_widget.setCurrentIndex(2)
+        self.update_workflow_ui(2)
+        
+        # 네비게이션 버튼 텍스트 업데이트
+        self.next_button.setText("결과 확인 →")
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-
-    # 폰트 설정 (나눔고딕을 우선으로 시도)
-    font = QFont("NanumGothic", 10)
-    if font.family() != "NanumGothic":
-        # 나눔고딕이 없으면 맑은 고딕으로 대체
-        font = QFont("Malgun Gothic", 9)  # Windows
-    
+    font = QFont("Noto Sans KR", 10)
     app.setFont(font)
-
-
-    # 애플리케이션 스타일 설정
     app.setStyle('Fusion')
-
     ex = AIGeneratorApp()
     ex.show()
     sys.exit(app.exec_())

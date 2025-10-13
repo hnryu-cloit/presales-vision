@@ -1,13 +1,16 @@
 import os
 from io import BytesIO
 from PIL import Image
+from common.gemini import Gemini
+from common import prompt
+import tempfile
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QGroupBox, QComboBox, QTextEdit,QGraphicsView,
+    QFileDialog, QGroupBox, QComboBox, QTextEdit,QGraphicsView, QLineEdit,
     QGraphicsScene, QGraphicsPixmapItem, QFrame,
     QSlider, QRadioButton, QButtonGroup, QFormLayout, QColorDialog, QAction, QMessageBox,
-    QDialog, QScrollArea
+    QDialog, QScrollArea, QInputDialog
 )
 
 from PyQt5.QtCore import Qt, QPoint, QRectF, pyqtSignal, QThread, QBuffer, QIODevice
@@ -127,7 +130,7 @@ class PhotoViewer(QGraphicsView):
         self.eraser_size = size
 
     def set_drawing_color(self, color):
-        color.setAlpha(204) # Apply 20% transparency (80% opacity)
+        color.setAlpha(204)
         self.drawing_color = color
         if self.draw_mode == 'brush':
             self.brush_color = self.drawing_color
@@ -311,6 +314,69 @@ class AiEditorWidget(QWidget):
 
         self.init_ui()
 
+    def segment_foreground(self):
+        if not self.original_image_path:
+            QMessageBox.warning(self, "이미지 없음", "편집할 이미지를 먼저 로드해주세요.")
+            return
+
+        try:
+            self.segment_button.setEnabled(False)
+            self.segment_button.setText("분리 중...")
+            QApplication.processEvents() # Update UI
+
+            # Get original image bytes
+            original_pixmap = self.image_viewer._photo.pixmap()
+            buffer = QBuffer()
+            buffer.open(QIODevice.WriteOnly)
+            original_pixmap.save(buffer, "PNG")
+            image_bytes = buffer.data()
+
+            # Call segmentation
+            mask_bytes = self.vision_editor.segment_image(image_bytes)
+
+            if mask_bytes:
+                mask_image = QImage()
+                mask_image.loadFromData(mask_bytes)
+
+                # The generated mask is likely black and white. We need to make it transparent where it's black.
+                processed_mask = QImage(mask_image.size(), QImage.Format_ARGB32)
+                processed_mask.fill(Qt.transparent)
+                painter = QPainter(processed_mask)
+                for y in range(mask_image.height()):
+                    for x in range(mask_image.width()):
+                        pixel_color = QColor(mask_image.pixel(x, y))
+                        if pixel_color.red() > 128: # If white
+                            if self.mask_keep_radio.isChecked():
+                                painter.setPen(self.image_viewer.drawing_color)
+                                painter.drawPoint(x, y)
+                        else: # if black
+                            if self.mask_change_radio.isChecked():
+                                painter.setPen(self.image_viewer.drawing_color)
+                                painter.drawPoint(x, y)
+                painter.end()
+
+                # Combine with existing mask
+                final_painter = QPainter(self.image_viewer.mask_image)
+                final_painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                final_painter.drawImage(0, 0, processed_mask)
+                final_painter.end()
+
+                self.image_viewer.viewport().update()
+                QMessageBox.information(self, "완료", "전경/배경 분리가 완료되었습니다.")
+            else:
+                QMessageBox.warning(self, "오류", "전경/배경 분리에 실패했습니다.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"세그멘테이션 중 오류 발생: {e}")
+        finally:
+            self.segment_button.setEnabled(True)
+            self.segment_button.setText("전경/배경 분리")
+
+    def update_subject_options(self):
+        is_person = self.person_radio.isChecked()
+        self.person_options_widget.setVisible(is_person)
+        self.object_options_widget.setVisible(not is_person)
+
     def init_ui(self):
         # The main layout is now a QVBoxLayout to accommodate the bottom bar
         main_layout = QVBoxLayout(self)
@@ -363,6 +429,18 @@ class AiEditorWidget(QWidget):
         tools_layout.addWidget(self.color_btn)
         self.color_btn.clicked.connect(self.open_color_picker)
 
+        self.upscale_btn = QPushButton("해상도 향상")
+        tools_layout.addWidget(self.upscale_btn)
+        self.upscale_btn.clicked.connect(self.upscale_image)
+
+        self.expand_btn = QPushButton("생성형 확장")
+        tools_layout.addWidget(self.expand_btn)
+        self.expand_btn.clicked.connect(self.expand_image)
+
+        self.text_to_image_btn = QPushButton("텍스트로 새로 만들기")
+        tools_layout.addWidget(self.text_to_image_btn)
+        self.text_to_image_btn.clicked.connect(self.new_from_text)
+
 
         # Undo/Redo buttons (moved inside tools_layout)
         undo_redo_layout = QHBoxLayout()
@@ -398,11 +476,24 @@ class AiEditorWidget(QWidget):
         ai_options_panel = QGroupBox("AI 편집 옵션")
         ai_options_layout = QVBoxLayout(ai_options_panel)
 
-        # 2.1 Segmentation & Masking
+        # 2.1 Subject Type
+        subject_group = QGroupBox("피사체 유형")
+        subject_layout = QHBoxLayout(subject_group)
+        self.person_radio = QRadioButton("인물")
+        self.object_radio = QRadioButton("사물/제품")
+        self.person_radio.setChecked(True)
+        self.person_radio.toggled.connect(self.update_subject_options)
+        self.object_radio.toggled.connect(self.update_subject_options)
+        subject_layout.addWidget(self.person_radio)
+        subject_layout.addWidget(self.object_radio)
+        ai_options_layout.addWidget(subject_group)
+
+        # 2.2 Segmentation & Masking
         seg_group = QGroupBox("영역 선택 및 마스크")
         seg_layout = QVBoxLayout(seg_group)
 
         self.segment_button = QPushButton("전경/배경 분리")
+        self.segment_button.clicked.connect(self.segment_foreground)
         seg_layout.addWidget(self.segment_button)
         self.mask_keep_radio = QRadioButton("선택 영역 유지")
         self.mask_change_radio = QRadioButton("선택 영역 변경")
@@ -413,9 +504,29 @@ class AiEditorWidget(QWidget):
         ai_options_layout.addWidget(seg_group)
 
         # 2.2 Detailed Controls
-        details_group = QGroupBox("상세 옵션")
-        details_layout = QFormLayout(details_group)
+        self.details_group = QGroupBox("상세 옵션")
+        self.details_group_layout = QVBoxLayout(self.details_group)
+
+        # Person-specific options container
+        self.person_options_widget = QWidget()
+        details_layout = QFormLayout(self.person_options_widget)
         details_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.details_group_layout.addWidget(self.person_options_widget)
+
+        # Object-specific options container
+        self.object_options_widget = QWidget()
+        object_details_layout = QFormLayout(self.object_options_widget)
+        object_details_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.object_angle_combo = QComboBox()
+        self.object_angle_combo.addItems(["정면", "좌측면", "우측면", "45도 각도", "상단", "하단"])
+        object_details_layout.addRow("제품 각도:", self.object_angle_combo)
+        self.composition_combo = QComboBox()
+        self.composition_combo.addItems(["중앙 배치", "여백의 미", "패턴 반복"])
+        object_details_layout.addRow("구도:", self.composition_combo)
+        self.details_group_layout.addWidget(self.object_options_widget)
+        self.object_options_widget.setVisible(False)
+
+        ai_options_layout.addWidget(self.details_group)
 
         # Pose section
         self.pose_combo = QComboBox()
@@ -508,7 +619,6 @@ class AiEditorWidget(QWidget):
         self.mood_ref_btn.setVisible(False)
         self.mood_ref_btn.clicked.connect(lambda: self.upload_reference_image('mood'))
         details_layout.addRow("", self.mood_ref_btn)
-        ai_options_layout.addWidget(details_group)
 
         # 초기 상태에서 이미 입력된 내용이 있으면 표시
         self.update_all_visibility()
@@ -588,22 +698,40 @@ class AiEditorWidget(QWidget):
         # --- Bottom Bar ---
         bottom_widget = QWidget()
         bottom_layout = QHBoxLayout(bottom_widget)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setContentsMargins(5, 5, 5, 5)
+        bottom_layout.setSpacing(10)
+
+        self.user_prompt_input = QLineEdit()
+        self.user_prompt_input.setPlaceholderText("사용자 프롬프트를 입력하세요...")
+        self.user_prompt_input.setMinimumHeight(40)
+        bottom_layout.addWidget(self.user_prompt_input, 1)
 
         self.apply_button = QPushButton("적용하기")
-        self.apply_button.setIcon(QIcon("../resource/icon/checked.png"))
-        self.apply_button.setStyleSheet("background-color: #A23B72; color: white; padding: 10px; font-weight: bold;")
+        self.apply_button.setMinimumHeight(40)
+        self.apply_button.setMinimumWidth(100)
+        # Check if icon exists before setting
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../resource/icon/checked.png")
+        if os.path.exists(icon_path):
+            self.apply_button.setIcon(QIcon(icon_path))
+        self.apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #A23B72; 
+                color: white; 
+                padding: 10px 20px; 
+                font-weight: bold;
+                border-radius: 5px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #8A2F5F;
+            }
+            QPushButton:pressed {
+                background-color: #6D2349;
+            }
+        """)
         self.apply_button.clicked.connect(self.start_image_regeneration)
 
-        self.register_button = QPushButton("등록하기")
-        self.register_button.setIcon(QIcon("../resource/icon/upload.png"))
-        self.register_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
-        self.register_button.setVisible(False)  # 초기에는 숨김
-        self.register_button.clicked.connect(self.register_image)
-
-        bottom_layout.addStretch(1)
         bottom_layout.addWidget(self.apply_button)
-        bottom_layout.addWidget(self.register_button)
 
         # --- Add widgets to main layout ---
         main_layout.addWidget(content_widget, 1)
@@ -618,7 +746,7 @@ class AiEditorWidget(QWidget):
 
     def create_image_card(self, image_path, grid_widget, tag=None):
         card = QWidget()
-        card.setFixedSize(80, 100)  # 태그 공간을 위해 높이 증가
+        card.setFixedSize(96, 116)  # 태그 공간을 위해 높이 증가
         card.setStyleSheet(
             """
             QWidget { border: 2px solid #DDD; border-radius: 5px; background-color: white; }
@@ -630,7 +758,7 @@ class AiEditorWidget(QWidget):
 
         # 이미지 레이블
         img_label = QLabel()
-        img_label.setFixedSize(76, 56)  # 태그 공간을 위해 높이 조정
+        img_label.setFixedSize(90, 90)  # 태그 공간을 위해 높이 조정
         img_label.setAlignment(Qt.AlignCenter)
         img_label.setStyleSheet("border: none; background-color: #F8F8F8;")
         layout.addWidget(img_label)
@@ -675,7 +803,7 @@ class AiEditorWidget(QWidget):
 
     def create_add_button(self, grid_widget):
         add_card = QWidget()
-        add_card.setFixedSize(80, 80)
+        add_card.setFixedSize(96, 96)
         add_card.setStyleSheet(
             """
             QWidget { border: 2px dashed #AAA; border-radius: 5px; background-color: #F8F8F8; }
@@ -728,11 +856,13 @@ class AiEditorWidget(QWidget):
 
     def update_image_grid(self, grid_widget):
         layout = grid_widget.layout()
-        # Clear all widgets
-        for i in reversed(range(layout.count())):
-            child = layout.itemAt(i).widget()
-            if child:
-                child.deleteLater()
+        max_images = getattr(grid_widget, 'max_images', 5)
+
+        # Clear all items from the layout
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
         # Add category reference images with tags first
         category_images = []
@@ -747,18 +877,115 @@ class AiEditorWidget(QWidget):
 
         for image_path, tag in category_images:
             card = self.create_image_card(image_path, grid_widget, tag)
-            layout.insertWidget(layout.count() - 1, card)
+            layout.addWidget(card)
 
         # Add item reference images (no tags)
         for image_path in grid_widget.image_paths:
             card = self.create_image_card(image_path, grid_widget)
-            layout.insertWidget(layout.count() - 1, card)
+            layout.addWidget(card)
 
         # Add the add button if not at max capacity for item references
-        max_images = getattr(grid_widget, 'max_images', 5)
         if len(grid_widget.image_paths) < max_images:
             add_btn = self.create_add_button(grid_widget)
-            layout.insertWidget(layout.count() - 1, add_btn)
+            layout.addWidget(add_btn)
+
+        layout.addStretch()
+
+    def new_from_text(self):
+        text, ok = QInputDialog.getText(self, '텍스트로 새로 만들기', '생성할 이미지에 대한 프롬프트를 입력하세요:')
+        if ok and text:
+            try:
+                self.text_to_image_btn.setEnabled(False)
+                self.text_to_image_btn.setText("생성 중...")
+                QApplication.processEvents() # Update UI
+
+                # Call text_to_image
+                image_bytes = self.vision_editor.text_to_image(text)
+
+                if image_bytes:
+                    # Save to a temporary file and load it
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f:
+                        f.write(image_bytes)
+                        self.load_image(f.name)
+                    QMessageBox.information(self, "완료", "이미지 생성이 완료되었습니다.")
+                else:
+                    QMessageBox.warning(self, "오류", "이미지 생성에 실패했습니다.")
+
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"이미지 생성 중 오류 발생: {e}")
+            finally:
+                self.text_to_image_btn.setEnabled(True)
+                self.text_to_image_btn.setText("텍스트로 새로 만들기")
+
+    def expand_image(self):
+        if not self.original_image_path:
+            QMessageBox.warning(self, "이미지 없음", "편집할 이미지를 먼저 로드해주세요.")
+            return
+
+        try:
+            self.expand_btn.setEnabled(False)
+            self.expand_btn.setText("확장 중...")
+            QApplication.processEvents() # Update UI
+
+            # Get original image bytes
+            original_pixmap = self.image_viewer._photo.pixmap()
+            buffer = QBuffer()
+            buffer.open(QIODevice.WriteOnly)
+            original_pixmap.save(buffer, "PNG")
+            image_bytes = buffer.data()
+
+            # Call expand
+            expanded_bytes = self.vision_editor.expand_image(image_bytes)
+
+            if expanded_bytes:
+                image_applied = self._show_image_popup(expanded_bytes, "확장된 이미지")
+                if image_applied:
+                    print("확장된 이미지가 편집기에 적용되었습니다.")
+                else:
+                    print("사용자가 이미지 적용을 취소했습니다.")
+            else:
+                QMessageBox.warning(self, "오류", "이미지 확장에 실패했습니다.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"확장 중 오류 발생: {e}")
+        finally:
+            self.expand_btn.setEnabled(True)
+            self.expand_btn.setText("생성형 확장")
+
+    def upscale_image(self):
+        if not self.original_image_path:
+            QMessageBox.warning(self, "이미지 없음", "편집할 이미지를 먼저 로드해주세요.")
+            return
+
+        try:
+            self.upscale_btn.setEnabled(False)
+            self.upscale_btn.setText("업스케일 중...")
+            QApplication.processEvents() # Update UI
+
+            # Get original image bytes
+            original_pixmap = self.image_viewer._photo.pixmap()
+            buffer = QBuffer()
+            buffer.open(QIODevice.WriteOnly)
+            original_pixmap.save(buffer, "PNG")
+            image_bytes = buffer.data()
+
+            # Call upscale
+            upscaled_bytes = self.vision_editor.upscale_image(image_bytes)
+
+            if upscaled_bytes:
+                image_applied = self._show_image_popup(upscaled_bytes, "업스케일된 이미지")
+                if image_applied:
+                    print("업스케일된 이미지가 편집기에 적용되었습니다.")
+                else:
+                    print("사용자가 이미지 적용을 취소했습니다.")
+            else:
+                QMessageBox.warning(self, "오류", "이미지 업스케일에 실패했습니다.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "오류", f"업스케일 중 오류 발생: {e}")
+        finally:
+            self.upscale_btn.setEnabled(True)
+            self.upscale_btn.setText("업스케일")
 
     def open_color_picker(self):
         color = QColorDialog.getColor()
@@ -965,8 +1192,6 @@ class AiEditorWidget(QWidget):
         pixmap = QPixmap(image_path)
         if not pixmap.isNull():
             self.image_viewer.set_photo(pixmap)
-            # 원본 이미지 로드 시에는 등록하기 버튼 숨김 (업데이트된 이미지가 아니므로)
-            self.register_button.setVisible(False)
 
     # yhkim1
     def _show_image_popup(self, image_bytes: bytes, title: str = "Image Popup"):
@@ -982,8 +1207,6 @@ class AiEditorWidget(QWidget):
             if result == QDialog.Accepted:
                 # 재생성된 이미지를 현재 편집기의 이미지 뷰어에 적용
                 self.image_viewer.set_photo(dialog.pixmap)
-                # 이미지가 업데이트되었으므로 등록하기 버튼 표시
-                self.register_button.setVisible(True)
                 return True
             return False
         except Exception as e:
@@ -1072,6 +1295,7 @@ class AiEditorWidget(QWidget):
                 source_image=original_image,
                 mask_image=mask_image,
                 reference_images=reference_images,
+                user_prompt=edit_data.get('user_prompt', ''),
                 annotation=False
             )
             self._save_bytes_as_png(generated_image, "./generated_image_temp.png")
@@ -1113,7 +1337,7 @@ class AiEditorWidget(QWidget):
             #     "mask_image": "b""'\\x89PNG\r\...\\x00\\x00"}
 
             # edit_data에서 사용할 옵션값만 추출
-            keys_to_extract = ['action', 'framing', 'angle', 'mood']
+            keys_to_extract = ['action', 'framing', 'angle', 'mood', 'user_prompt']
             extracted_edit_data = {key: edit_data[key] for key in keys_to_extract}
 
             generated_image_shot = self.vision_editor.regenerate_image_shot(
@@ -1129,90 +1353,21 @@ class AiEditorWidget(QWidget):
                     print("재생성된 이미지가 편집기에 적용되었습니다.")
                 else:
                     print("사용자가 이미지 적용을 취소했습니다.")
-                # PathManager를 사용하여 temp 디렉토리 생성
+                
+                temp_dir = "./temp"
+                if not os.path.exists(temp_dir):
+                    os.makedirs(temp_dir)
                 from datetime import datetime
-                from admin.path_manager import PathManager
-
-                path_manager = PathManager()
-                temp_dir = path_manager.get_recommend_temp_dir("modelshot")
-
-                if temp_dir:
-                    # 현재 시간으로 파일명 생성
-                    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    temp_file_path = f"{temp_dir}/generate_image_{current_time}.png"
-                    self._save_bytes_as_png(generated_image_shot, temp_file_path)
-                else:
-                    # 폴백: 로컬 temp 디렉토리 사용
-                    import os
-                    temp_dir = "./temp"
-                    if not os.path.exists(temp_dir):
-                        os.makedirs(temp_dir)
-                    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    temp_file_path = f"{temp_dir}/generate_image_{current_time}.png"
-                    self._save_bytes_as_png(generated_image_shot, temp_file_path)
+                current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+                temp_file_path = f"{temp_dir}/generate_image_{current_time}.png"
+                self._save_bytes_as_png(generated_image_shot, temp_file_path)
             else:
                 print("실패", "이미지 재생성에 실패했습니다. (결과 없음)")
 
         except Exception as e:
             print(f"An error occurred during regeneration: {e}")
 
-    def register_image(self):
-        """현재 편집기의 이미지를 상품 등록 폼에 등록하는 함수"""
-        if not self.original_image_path:
-            QMessageBox.warning(self, "이미지 없음", "등록할 이미지가 없습니다.")
-            return
 
-        try:
-            # 현재 편집기의 이미지를 파일로 저장
-            current_pixmap = self.image_viewer._photo.pixmap()
-            if current_pixmap.isNull():
-                QMessageBox.warning(self, "이미지 없음", "등록할 이미지가 없습니다.")
-                return
-
-            # 임시 파일로 저장 (상품 등록 폼에서 사용할 수 있도록)
-            import tempfile
-            import os
-            temp_dir = tempfile.gettempdir()
-            temp_filename = f"edited_image_{os.getpid()}_{id(self)}.png"
-            temp_file_path = os.path.join(temp_dir, temp_filename)
-
-            # 이미지 저장
-            current_pixmap.save(temp_file_path)
-
-            # 부모 위젯이 ProductForm인지 확인하고 이미지 추가
-            parent_widget = self.parent()
-            while parent_widget:
-                if hasattr(parent_widget, 'image_grid_widget') and hasattr(parent_widget, 'add_image_from_result'):
-                    # ProductForm을 찾았을 때
-                    parent_widget.add_image_from_result(temp_file_path)
-                    msg = QMessageBox()
-                    msg.setIcon(QMessageBox.Information)
-                    msg.setWindowTitle("등록 완료")
-                    msg.setText("이미지가 상품 등록 폼에 추가되었습니다.")
-                    msg.adjustSize()
-                    msg.exec_()
-                    return
-                parent_widget = parent_widget.parent()
-
-            # ProductForm을 찾지 못한 경우 일반 파일 저장
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "이미지 등록",
-                "edited_image.png",
-                "Image files (*.png *.jpg *.jpeg)"
-            )
-
-            if file_path:
-                current_pixmap.save(file_path)
-                msg = QMessageBox()
-                msg.setIcon(QMessageBox.Information)
-                msg.setWindowTitle("등록 완료")
-                msg.setText(f"이미지가 파일로 저장되었습니다.\n경로: {file_path}")
-                msg.adjustSize()
-                msg.exec_()
-
-        except Exception as e:
-            QMessageBox.critical(self, "등록 실패", f"이미지 등록 중 오류가 발생했습니다: {str(e)}")
 
     def handle_regeneration_result(self, new_image_path, error_message):
         self.apply_button.setEnabled(True)
@@ -1231,54 +1386,70 @@ class AiEditorWidget(QWidget):
             QMessageBox.warning(self, "이미지 재생성", "이미지 재생성 결과가 없습니다.")
 
     def collect_editor_data(self):
-        # 각 상세 설명 필드에서 텍스트 수집
-        pose_desc = self.pose_detail.toPlainText() if self.pose_detail.isVisible() else ''
-        framing_desc = self.framing_detail.toPlainText() if self.framing_detail.isVisible() else ''
-        angle_desc = self.angle_detail.toPlainText() if self.angle_detail.isVisible() else ''
-        mood_desc = self.mood_detail.toPlainText() if self.mood_detail.isVisible() else ''
+        # ... (existing code to collect pose_desc, etc.)
 
+        user_prompt = self.user_prompt_input.text()
+        mask_image_bytes = self.get_mask_bytes()
+        reference_data = self.get_reference_data()
+
+        edit_data = {
+            'user_prompt': user_prompt,
+            'mask_image': mask_image_bytes,
+            'original_image': self.original_image_path,
+            'reference': reference_data['item']
+        }
+
+        if self.person_radio.isChecked():
+            edit_data.update({
+                'action': {
+                    'option': self.pose_combo.currentText(),
+                    'description': self.pose_detail.toPlainText() if self.pose_detail.isVisible() else '',
+                    'reference': reference_data['pose'] if reference_data['pose'] else ""
+                },
+                'framing': {
+                    'option': self.framing_combo.currentText(),
+                    'description': self.framing_detail.toPlainText() if self.framing_detail.isVisible() else '',
+                    'reference': reference_data['framing'] if reference_data['framing'] else ""
+                },
+                'angle': {
+                    'option': self.angle_combo.currentText(),
+                    'description': self.angle_detail.toPlainText() if self.angle_detail.isVisible() else '',
+                    'reference': reference_data['angle'] if reference_data['angle'] else ""
+                },
+                'mood': {
+                    'option': self.mode_combo.currentText(),
+                    'description': self.mood_detail.toPlainText() if self.mood_detail.isVisible() else '',
+                    'reference': reference_data['mood'] if reference_data['mood'] else ""
+                }
+            })
+        else: # Object is checked
+            edit_data.update({
+                'object_angle': {
+                    'option': self.object_angle_combo.currentText(),
+                },
+                'composition': {
+                    'option': self.composition_combo.currentText(),
+                }
+            })
+
+        return edit_data
+
+    def get_mask_bytes(self):
         buffer = QBuffer()
         buffer.open(QIODevice.WriteOnly)
         self.image_viewer.mask_image.save(buffer, "PNG")
         mask_image_bytes = buffer.data().data()
         buffer.close()
+        return mask_image_bytes
 
-        # 카테고리별 레퍼런스 이미지 수집
-        reference_data = {
-            'item': [path for path in getattr(self.image_grid_widget, 'image_paths', [])],  # 기존 아이템 레퍼런스 (최대 5개)
-            'pose': self.pose_reference if self.pose_reference else None,  # 포즈 레퍼런스 (최대 1개)
-            'framing': self.framing_reference if self.framing_reference else None,  # 구도 레퍼런스 (최대 1개)
-            'angle': self.angle_reference if self.angle_reference else None,  # 방향 레퍼런스 (최대 1개)
-            'mood': self.mood_reference if self.mood_reference else None  # 분위기 레퍼런스 (최대 1개)
+    def get_reference_data(self):
+        return {
+            'item': [path for path in getattr(self.image_grid_widget, 'image_paths', [])],
+            'pose': self.pose_reference if self.pose_reference else None,
+            'framing': self.framing_reference if self.framing_reference else None,
+            'angle': self.angle_reference if self.angle_reference else None,
+            'mood': self.mood_reference if self.mood_reference else None
         }
-
-        edit_data = {
-            'action': {
-                'option': self.pose_combo.currentText(),
-                'description': pose_desc,
-                'reference': reference_data['pose'] if reference_data['pose'] else ""
-            },
-            'framing': {
-                'option': self.framing_combo.currentText(),
-                'description': framing_desc,
-                'reference': reference_data['framing'] if reference_data['framing'] else ""
-            },
-            'angle': {
-                'option': self.angle_combo.currentText(),
-                'description': angle_desc,
-                'reference': reference_data['angle'] if reference_data['angle'] else ""
-            },
-            'mood': {
-                'option': self.mode_combo.currentText(),
-                'description': mood_desc,
-                'reference': reference_data['mood'] if reference_data['mood'] else ""
-            },
-            'reference': reference_data['item'],  # 아이템 레퍼런스만 (최대 5개)
-            'original_image': self.original_image_path,
-            'mask_image': mask_image_bytes
-        }
-
-        return edit_data
 
 
 
@@ -1343,14 +1514,11 @@ class ImageRegenerationThread(QThread):
 
 class VisionEditor():
     def __init__(self):
-        # 설정 파서로부터 입력 디렉토리 및 프로젝트명 등 받아오기
-        self.args = parser()
-
         # Gemini models
-        self.gemini = GeminiEditor()
+        self.gemini = Gemini()
         self.model = "gemini-2.0-flash"  # gemini-2.5-flash
         self.model_nb = "gemini-2.5-flash-image-preview"
-        self.prompt = EDITOR()
+        self.prompt = prompt
 
     def _read_image_as_bytes(self, image_path: str) -> bytes:
         """
@@ -1383,279 +1551,149 @@ class VisionEditor():
             print(f"오류가 발생했습니다: {e}")
 
 
-    # --- [Main] 메타데이터 추출 ---
-    # 기존 버전
-    def regenerate_image(self, source_image: bytes, mask_image: bytes, reference_images: list,
+    def text_to_image(self, prompt: str) -> bytes:
+        """
+        텍스트 프롬프트로부터 이미지를 생성합니다.
+        """
+        generated_image_data, _ = self.gemini.call_image_generator(prompt=prompt, image_files=[])
+
+        if generated_image_data:
+            return generated_image_data[0].data
+        return None
+
+    def expand_image(self, source_image: bytes) -> bytes:
+        """
+        이미지를 확장하고 AI로 채웁니다.
+        """
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_src:
+            f_src.write(source_image)
+            source_image_path = f_src.name
+
+        try:
+            p = "Expand the given image to 1.5 times its original size, maintaining the aspect ratio. The new areas should be filled with content that seamlessly blends with the original image."
+            image_files = [source_image_path]
+            
+            generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_files)
+
+            if generated_image_data:
+                return generated_image_data[0].data
+            return None
+        finally:
+            os.unlink(source_image_path)
+
+    def upscale_image(self, source_image: bytes) -> bytes:
+        """
+        이미지를 업스케일하여 품질을 향상시킵니다.
+        """
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_src:
+            f_src.write(source_image)
+            source_image_path = f_src.name
+
+        try:
+            p = "Upscale the given image to a higher resolution, enhancing its quality, clarity, and sharpness. The target resolution should be around 8 megapixels if possible."
+            image_files = [source_image_path]
+            
+            generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_files)
+
+            if generated_image_data:
+                return generated_image_data[0].data
+            return None
+        finally:
+            os.unlink(source_image_path)
+
+    def segment_image(self, source_image: bytes) -> bytes:
+        """
+        이미지에서 전경을 분리하여 마스크 이미지를 생성합니다.
+        """
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_src:
+            f_src.write(source_image)
+            source_image_path = f_src.name
+
+        try:
+            p = "Given the input image, create a segmentation mask of the main object. The mask should be a black and white image where the main object is white and the background is black."
+            image_files = [source_image_path]
+            
+            generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_files)
+
+            if generated_image_data:
+                return generated_image_data[0].data
+            return None
+        finally:
+            os.unlink(source_image_path)
+
+    def regenerate_image(self, source_image: bytes, mask_image: bytes, reference_images: list, user_prompt: str,
                           annotation: bool) -> bytes:
         """
         편집 기능을 통해 이미지 의상 재생성하는 함수
         """
         try:
-            print("bytes 데이터를 PIL Image 객체로 변환합니다...")
-            pil_source_image = Image.open(BytesIO(source_image))
-            pil_mask_image = Image.open(BytesIO(mask_image))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_src:
+                f_src.write(source_image)
+                source_image_path = f_src.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_mask:
+                f_mask.write(mask_image)
+                mask_image_path = f_mask.name
 
-            contents = [
-                pil_source_image,
-                pil_mask_image
-            ]
+            reference_image_paths = []
+            for ref_bytes in reference_images:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_ref:
+                    f_ref.write(ref_bytes)
+                    reference_image_paths.append(f_ref.name)
 
-            print("레퍼런스 이미지를 체크합니다...")
-            print(f"발견된 레퍼런스 이미지 {len(reference_images)}개")
-            if reference_images and isinstance(reference_images, list):
-                # PIL 이미지 객체들을 저장할 리스트를 생성합니다.
-                pil_reference_images = []
-                # 리스트에 있는 각 이미지 바이트에 대해 반복 작업을 수행합니다.
-                for ref_image_bytes in reference_images:
-                    pil_img = Image.open(BytesIO(ref_image_bytes))
-                    pil_reference_images.append(pil_img)
+            p = self.prompt.REPLACE_OBJECT_IN_REFERENCE.format(object_to_replace='the selected area')
+            if user_prompt:
+                p += "\n\nUser prompt: " + user_prompt
+            image_files = [source_image_path, mask_image_path] + reference_image_paths
+            
+            generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_files)
 
-                # contents 리스트에 pil_reference_images 리스트의 모든 원소를 추가합니다.
-                contents.extend(pil_reference_images)
-        except Exception as e:
-            print(f"이미지 바이트를 PIL 이미지로 변환하는 중 오류 발생: {e}")
+            if generated_image_data:
+                return generated_image_data[0].data
             return None
 
-        # 최종적으로 LLM에 전달한 contents
-        prompt = self.prompt.model_shot_edit_prompt(annotation)
-        contents.insert(1, prompt)
-
-        # 3. 수정된 contents 리스트를 API에 전달합니다. (GeminiEditor의 메소드 호출 방식에 맞게 조정)
-        generated_image = self.gemini.regenerate_image_editor(contents, self.model_nb)
-        print(f"의상 변경 기법 프롬프트:\n{prompt}")
-
-        if generated_image:
-            print(type(generated_image))  # <class 'PIL.PngImagePlugin.PngImageFile'> 출력 확인
-            # 3. 성공 시, PIL Image 객체를 bytes로 변환하여 반환합니다.
-            buffer = BytesIO()
-            generated_image.save(buffer, format="PNG")
-            image_bytes = buffer.getvalue()
-            return image_bytes
-
-            # 4. 실패 시, None을 반환합니다.
-        print("<class 'NoneType'>")  # 실패 시 NoneType 출력
-        return None
-
-    def regenerate_image(self, source_image: bytes, mask_image: bytes, reference_images: list,
-                          annotation: bool) -> bytes:
-        """
-        편집 기능을 통해 이미지 의상 재생성하는 함수
-        """
-        try:
-            print("bytes 데이터를 PIL Image 객체로 변환합니다...")
-            pil_source_image = Image.open(BytesIO(source_image))
-            pil_mask_image = Image.open(BytesIO(mask_image))
-
-            contents = [
-                pil_source_image,
-                pil_mask_image
-            ]
-
-            print("레퍼런스 이미지를 체크합니다...")
-            print(f"발견된 레퍼런스 이미지 {len(reference_images)}개")
-            if reference_images and isinstance(reference_images, list):
-                # PIL 이미지 객체들을 저장할 리스트를 생성합니다.
-                pil_reference_images = []
-                # 리스트에 있는 각 이미지 바이트에 대해 반복 작업을 수행합니다.
-                for ref_image_bytes in reference_images:
-                    pil_img = Image.open(BytesIO(ref_image_bytes))
-                    pil_reference_images.append(pil_img)
-
-                # contents 리스트에 pil_reference_images 리스트의 모든 원소를 추가합니다.
-                contents.extend(pil_reference_images)
-        except Exception as e:
-            print(f"이미지 바이트를 PIL 이미지로 변환하는 중 오류 발생: {e}")
-            return None
-
-        # 최종적으로 LLM에 전달한 contents
-        prompt = self.prompt.model_shot_edit_prompt(annotation)
-        contents.insert(1, prompt)
-
-        # 3. 수정된 contents 리스트를 API에 전달합니다. (GeminiEditor의 메소드 호출 방식에 맞게 조정)
-        generated_image = self.gemini.regenerate_image_editor(contents, self.model_nb)
-        print(f"의상 변경 기법 프롬프트:\n{prompt}")
-
-        if generated_image:
-            print(type(generated_image))  # <class 'PIL.PngImagePlugin.PngImageFile'> 출력 확인
-            # 3. 성공 시, PIL Image 객체를 bytes로 변환하여 반환합니다.
-            buffer = BytesIO()
-            generated_image.save(buffer, format="PNG")
-            image_bytes = buffer.getvalue()
-            return image_bytes
-
-            # 4. 실패 시, None을 반환합니다.
-        print("<class 'NoneType'>")  # 실패 시 NoneType 출력
-        return None
+        finally:
+            os.unlink(source_image_path)
+            os.unlink(mask_image_path)
+            for p in reference_image_paths:
+                os.unlink(p)
 
 
-    # 기존
-    # def regenerate_image_shot(self, source_image: bytes, regen_data: dict, reference_images: list) -> bytes:
-    #     """
-    #     촬영기법 반영하여 이미지 재생성하는 함수
-    #     """
-    #     try:
-    #         print("bytes 데이터를 PIL Image 객체로 변환합니다...")
-    #         pil_source_image = Image.open(BytesIO(source_image))
-    #
-    #         contents = [pil_source_image]
-    #
-    #         print("레퍼런스 이미지를 체크합니다...")
-    #         print(f"발견된 레퍼런스 이미지 {len(reference_images)}개")
-    #         if reference_images and isinstance(reference_images, list):
-    #             # PIL 이미지 객체들을 저장할 리스트를 생성합니다.
-    #             pil_reference_images = []
-    #             # 리스트에 있는 각 이미지 바이트에 대해 반복 작업을 수행합니다.
-    #             for ref_image_bytes in reference_images:
-    #                 pil_img = Image.open(BytesIO(ref_image_bytes))
-    #                 pil_reference_images.append(pil_img)
-    #
-    #             # contents 리스트에 pil_reference_images 리스트의 모든 원소를 추가합니다.
-    #             contents.extend(pil_reference_images)
-    #     except Exception as e:
-    #         print(f"이미지 바이트를 PIL 이미지로 변환하는 중 오류 발생: {e}")
-    #         return None
-    #
-    #     # 촬영 옵션 반영 프롬프트
-    #     prompt = self.prompt.model_pose_edit_prompt(regen_data)
-    #     print(f"촬영 기법 프롬프트:\n{prompt}")
-    #
-    #     # 최종적으로 LLM에 전달한 contents
-    #     contents.insert(1, prompt)
-    #
-    #     # 3. 수정된 contents 리스트를 API에 전달합니다. (GeminiEditor의 메소드 호출 방식에 맞게 조정)
-    #     generated_image = self.gemini.regenerate_image_editor(contents, self.model_nb)
-    #
-    #     if generated_image:
-    #         print(type(generated_image))  # <class 'PIL.PngImagePlugin.PngImageFile'> 출력 확인
-    #         # 3. 성공 시, PIL Image 객체를 bytes로 변환하여 반환합니다.
-    #         buffer = BytesIO()
-    #         generated_image.save(buffer, format="PNG")
-    #         image_bytes = buffer.getvalue()
-    #         return image_bytes
-    #
-    #         # 4. 실패 시, None을 반환합니다.
-    #     print("<class 'NoneType'>")  # 실패 시 NoneType 출력
-    #     return None
-    # yhkim1 - 구조 변경 가정
-    def _is_valid_image_path(self,path_string):
-        """
-        주어진 문자열이 비어있지 않고 유효한 이미지 파일 경로 형식인지 확인합니다.
-        """
-        if not path_string:
-            return False
-        # 문자열을 소문자로 변환하여 확장자를 검사합니다.
 
-        # 유효한 이미지 파일 확장자 목록
-        if path_string.lower().endswith(('.png', '.jpg', '.jpeg')):
-            return True
-        return False
 
     def regenerate_image_shot(self, source_image: bytes, regen_data: dict) -> bytes:
         """
         촬영기법 반영하여 이미지 재생성하는 함수
         """
-
-        print("bytes 데이터를 PIL Image 객체로 변환합니다...")
-        pil_source_image = Image.open(BytesIO(source_image))
-
-        contents = [pil_source_image]
-        image_num=1 # 원본 이미지
-
-        # regen_data의 각 항목을 순회하며 reference 값이 비어있지 않은 경우 처리
-        print("참고 이미지들을 PIL Image 객체로 변환하여 리스트에 추가합니다...")
+        instructions = []
         for category, data in regen_data.items():
-            reference_path = data.get("reference")
+            if category == 'user_prompt':
+                continue
+            if isinstance(data, dict) and data.get('option') and data.get('option') != '유지':
+                instructions.append(f"{category}: {data['option']} ({data.get('description', '')})")
+        
+        user_prompt = regen_data.get('user_prompt', '')
+        if user_prompt:
+            instructions.append(f"User prompt: {user_prompt}")
 
-            # reference_path가 존재하고, 빈 문자열이 아닌 경우
-            if reference_path:
-                try:
-                    print(f"'{category}'의 참고 이미지 경로를 읽습니다: {reference_path}")
-                    # 파일을 바이너리 읽기 모드로 열기
-                    with open(reference_path, 'rb') as f:
-                        image_bytes = f.read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_src:
+            f_src.write(source_image)
+            source_image_path = f_src.name
 
-                    # 바이트 데이터를 PIL Image 객체로 변환
-                    pil_reference_image = Image.open(BytesIO(image_bytes))
+        reference_image_paths = []
+        try:
+            for category, data in regen_data.items():
+                reference_path = data.get("reference")
+                if reference_path and os.path.exists(reference_path):
+                    reference_image_paths.append(reference_path)
 
-                    # contents 리스트에 추가
-                    contents.append(pil_reference_image)
-                    image_num += 1
-                    regen_data[category]["image_num"] = image_num
+            p = self.prompt.CHANGE_ATTRIBUTES.format(instructions=", ".join(instructions))
+            image_files = [source_image_path] + reference_image_paths
 
-                except FileNotFoundError:
-                    print(f"경고: '{reference_path}' 경로에서 파일을 찾을 수 없습니다. 이 파일은 건너뜁니다.")
-                except IOError:
-                    print(f"경고: '{reference_path}' 파일은 유효한 이미지 파일이 아니거나 손상되었습니다. 이 파일은 건너뜁니다.")
-                except Exception as e:
-                    print(f"'{reference_path}' 파일을 처리하는 중 에러가 발생했습니다: {e}")
+            generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_files)
 
-        print(f"총 {len(contents)}개의 이미지가 리스트에 준비되었습니다.")
+            if generated_image_data:
+                return generated_image_data[0].data
+            return None
+        finally:
+            os.unlink(source_image_path)
 
-        # 촬영 옵션 반영 프롬프트
-        prompt = self.prompt.model_pose_edit_prompt(regen_data)
-        print(f"촬영 기법 프롬프트:\n{prompt}")
-
-        # 최종적으로 LLM에 전달한 contents
-        contents.insert(1, prompt)
-
-        # 3. 수정된 contents 리스트를 API에 전달합니다. (GeminiEditor의 메소드 호출 방식에 맞게 조정)
-        generated_image = self.gemini.regenerate_image_editor(contents, self.model_nb)
-
-        if generated_image:
-            print(type(generated_image))  # <class 'PIL.PngImagePlugin.PngImageFile'> 출력 확인
-            # 3. 성공 시, PIL Image 객체를 bytes로 변환하여 반환합니다.
-            buffer = BytesIO()
-            generated_image.save(buffer, format="PNG")
-            image_bytes = buffer.getvalue()
-            return image_bytes
-
-            # 4. 실패 시, None을 반환합니다.
-        print("<class 'NoneType'>")  # 실패 시 NoneType 출력
-        return None
-
-
-    # 로컬 테스트용
-    @timefn
-    def run(self):
-        # yhkim1 테스트용 임시 데이터
-        source_image = self._read_image_as_bytes("../resource/test/08_result.png")
-        mask_image = self._read_image_as_bytes("../resource/test/mask_test_3.png")
-        reference_image_1 = self._read_image_as_bytes("../resource/test/reference_test_1.png")
-        reference_image_2 = self._read_image_as_bytes("../resource/test/reference_test_2.jpg")
-        reference_images=[reference_image_2]
-        annotation = False # False > 주석 없음
-        regen_data = {
-            "pose":"앉은 포즈",
-            "projection": "45도 각도",
-            "shot": "클로즈업",
-            "mood": "러블리/페미닌"
-        }
-        # print('-----------모델 의상 변경-----------')
-        # result_image_bytes = self.regenerate_image(source_image, mask_image, reference_images, annotation)
-        # print(type(result_image_bytes))
-        # result_image_path = "../resource/test/output.png"
-        # self._save_bytes_as_png(result_image_bytes, result_image_path)
-
-        print('-----------모델 포즈 변경-----------')
-        result_image_bytes = self._read_image_as_bytes("../resource/test/output.png")
-        reference_image_1 = self._read_image_as_bytes("../resource/test/pose_5.png")
-        reference_image_2 = self._read_image_as_bytes("../resource/test/mood_2.jpg")
-        reference_images = [reference_image_1, reference_image_2]
-        result_image_pose_bytes = self.regenerate_image_shot(result_image_bytes, regen_data, reference_images)
-        print(type(result_image_pose_bytes))
-        result_image_pose_path = "../resource/test/output_pose.png"
-        self._save_bytes_as_png(result_image_pose_bytes, result_image_pose_path)
-        return
-
-
-if __name__ == '__main__':
-    import sys
-    app = QApplication(sys.argv)
-    editor = AiEditorWidget()
-    editor.setWindowTitle("Copyright © 2025 ITCEN CLOIT All rights reserved.")
-
-    test_image_path = "../resource/test/08_result.png" # Create a dummy image for testing
-    if os.path.exists(test_image_path):
-        editor.load_image(test_image_path)
-    editor.show()
-    sys.exit(app.exec_())
