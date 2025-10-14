@@ -1,29 +1,9 @@
 import os
 from datetime import datetime
 
-import json
-from PIL import Image
 
 from common import prompt
 from common.gemini import Gemini
-
-def find_image_file(path):
-    """
-    Checks for an image file with different extensions (.png, .jpg, .jpeg).
-    If the given path exists, it returns the path.
-    Otherwise, it tries to find a file with the same name but a different extension.
-    """
-    if os.path.exists(path):
-        return path
-    
-    base, _ = os.path.splitext(path)
-    for ext in ['.png', '.jpg', '.jpeg']:
-        new_path = base + ext
-        if os.path.exists(new_path):
-            return new_path
-    # If no file is found, raise an error.
-    raise FileNotFoundError(f"Image file not found for base path: {base}")
-
 
 class ImageGenerator:
     def __init__(self, output_dir=None):
@@ -58,61 +38,66 @@ class ImageGenerator:
                     Mood/Lighting: {mood_desc}. \
                     The image should be vivid, high-end, and professionally captured."""
 
-    def change_attributes(self, image_path, instructions):
+    def change_attributes(self, image_paths, instructions):
         """Changes the color or orientation of a furniture image."""
         p = prompt.CHANGE_ATTRIBUTES.format(instructions=", ".join(instructions))
-        generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=[image_path])
+        generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_paths)
 
-        output_path = self._get_output_path(image_path, "_changed")
+        output_path = self._get_output_path(image_paths[0], "_changed")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        # self.show_image_popup(product_image_path=image_path, save_image_path=saved_files)
+        # self.show_image_popup(product_image_path=image_paths, save_image_path=saved_files)
         return saved_files
 
-    def create_thumbnail_with_metadata(self, image_path, reference_image_path=None):
+    def create_thumbnail_with_metadata(self, image_paths, reference_image_paths=None):
         """Generates a thumbnail with text overlay or a scene based on the description."""
-        if reference_image_path:
+        if reference_image_paths:
             p = prompt.APPLY_STYLE_FROM_REFERENCE
-            all_image_files = [image_path] + reference_image_path
+            all_image_files = image_paths + reference_image_paths
         else:
             p = prompt.CREATE_THUMBNAIL_WITH_METADATA
-            all_image_files = [image_path]
+            all_image_files = image_paths
 
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
-        output_path = self._get_output_path(image_path, "_thumbnail_style")
+        output_path = self._get_output_path(image_paths[0], "_thumbnail_style")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        # self.show_image_popup(product_image_path=image_path, reference_image_path=reference_image_path, save_image_path=saved_files)
+        # self.show_image_popup(product_image_path=image_paths, reference_image_path=reference_image_path, save_image_path=saved_files)
         return saved_files
 
-    def apply_style_from_reference(self, product_image_path, reference_image_path):
+    def apply_style_from_reference(self, product_image_paths, reference_image_paths):
         """Uses a reference image for style transfer."""
         p = prompt.APPLY_STYLE_FROM_REFERENCE
 
-        all_image_files = [product_image_path] + reference_image_path
+        all_image_files = product_image_paths + reference_image_paths
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
-        output_path = self._get_output_path(product_image_path, "_styled")
+        output_path = self._get_output_path(product_image_paths[0], "_styled")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        # self.show_image_popup(product_image_path=product_image_path, reference_image_path=reference_image_path, save_image_path=saved_files)
+        # self.show_image_popup(product_image_path=product_image_paths, reference_image_path=reference_image_path, save_image_path=saved_files)
         return saved_files
 
-    def replace_object_in_reference(self, product_image_path, reference_image_path):
+    def replace_object_in_reference(self, product_image_paths, reference_image_paths):
         """Inpaints the product into a reference scene."""
-        p = prompt.REPLACE_OBJECT_IN_REFERENCE.format(object_to_replace=product_image_path)
+        object_description = ", ".join([os.path.splitext(os.path.basename(p))[0] for p in product_image_paths])
+        p = prompt.REPLACE_OBJECT_IN_REFERENCE.format(object_to_replace=object_description)
 
-        all_image_files = [product_image_path] + reference_image_path
+        all_image_files = product_image_paths + reference_image_paths
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
-        output_path = self._get_output_path(product_image_path, "_replaced")
+        output_path = self._get_output_path(product_image_paths[0], "_replaced")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        # self.show_image_popup(product_image_path=product_image_path, reference_image_path=reference_image_path, save_image_path=saved_files)
+        # self.show_image_popup(product_image_path=product_image_paths, reference_image_path=reference_image_path, save_image_path=saved_files)
         return saved_files
 
-    def create_beauty_scene(self, product_image_paths):
+    def create_beauty_scene(self, product_image_paths, reference_image_paths=None):
         """Combines multiple products into one scene."""
 
         p = prompt.CREATE_BEAUTY_SCENE
-        generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=product_image_paths)
+        if not reference_image_paths is None:
+            all_image_files = product_image_paths + reference_image_paths
+        else:
+            all_image_files = reference_image_paths
+        generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
         output_path = os.path.join(self.output_dir, "beauty_scene.png")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
@@ -147,35 +132,38 @@ if __name__ == '__main__':
     refer_dir = './resource/레퍼런스'
     generator = ImageGenerator(output_dir=output_dir)
 
-    # 1. Change Attributes
-    generator.change_attributes(
-        image_path=find_image_file(f'{input_dir}/샴푸.png'),
-        instructions=['제품 우측 컷으로 교체 해주세요.']
-    )
-
-    ## 2. Create Thumbnail with Metadata
-    generator.create_thumbnail_with_metadata(
-        image_path=find_image_file(f'{input_dir}/샴푸.png'),
-    )
-
-    ## 3. Apply Style
-    generator.apply_style_from_reference(
-        product_image_path=find_image_file(f'{input_dir}/샴푸.png'),
-        reference_image_path=[find_image_file(f'{refer_dir}/샴푸002.jpg')],
-    )
-
-    ## 4. Replace Object
-    generator.replace_object_in_reference(
-        product_image_path=find_image_file(f'{input_dir}/헤어오일.png'),
-        reference_image_path=[find_image_file(f'{refer_dir}/스틸컷001.jpg')],
-    )
+    # # # 1. Change Attributes
+    # generator.change_attributes(
+    #     image_paths=[f'{input_dir}/샴푸.png'],
+    #     instructions=['제품 우측 컷으로 교체 해주세요.']
+    # )
+    #
+    # # ## 2. Create Thumbnail with Metadata
+    # generator.create_thumbnail_with_metadata(
+    #     image_paths=[f'{input_dir}/샴푸.png'],
+    # )
+    # #
+    # # ## 3. Apply Style
+    # generator.apply_style_from_reference(
+    #     product_image_paths=[f'{input_dir}/샴푸.png'],
+    #     reference_image_paths=[f'{refer_dir}/샴푸002.jpg'],
+    # )
+    #
+    # ## 4. Replace Object
+    # generator.replace_object_in_reference(
+    #     product_image_paths=[f'{input_dir}/헤어오일.png'],
+    #     reference_image_paths=[f'{refer_dir}/스틸컷001.jpg'],
+    # )
 
     ##5. Create Beauty Scene
     generator.create_beauty_scene(
         product_image_paths=[
-            find_image_file(f'{input_dir}/샴푸.png'),
-            find_image_file(f'{input_dir}/트린트먼트.jpg'),
-            find_image_file(f'{input_dir}/헤어스프레이.jpg'),
-            find_image_file(f'{input_dir}/헤어오일.jpg')
+            f'{input_dir}/샴푸.png',
+            f'{input_dir}/트린트먼트.png',
+            f'{input_dir}/헤어스프레이.jpg',
+            f'{input_dir}/헤어오일.png'
+        ],
+        reference_image_paths=[
+            f'{refer_dir}/제품라인업005.jpg'
         ]
     )

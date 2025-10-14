@@ -8,7 +8,7 @@ from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot, QTimer
 
 from common.gemini import Gemini
-from generate import ImageGenerator, find_image_file
+from generate import ImageGenerator
 
 
 class ImageGenerationThread(QThread):
@@ -60,7 +60,7 @@ class AIGeneratorApp(QMainWindow):
             "short": "레퍼런스 이미지 속 특정 제품을 자사 제품으로 자연스럽게 합성",
             "detail": "레퍼런스 이미지의 특정 제품 위치에 자사 제품을 자연스럽게 합성합니다. 조명과 그림자까지 자동 조정됩니다."
         },
-        "뷰티샷 생성": {
+        "스튜디오 촬영": {
             "short": "여러 제품을 하나의 공간에 배치한 제품 연출 스틸컷 생성",
             "detail": "여러 제품을 하나의 공간(스튜디오, 화장대, 욕실 등)에 배치한 자연스러운 생활 장면을 만들어드립니다."
         }
@@ -265,7 +265,7 @@ class AIGeneratorApp(QMainWindow):
             "create_thumbnail": QPushButton("썸네일 생성"),
             "apply_style": QPushButton("스타일 적용"),
             "replace_object": QPushButton("객체 교체"),
-            "create_scene": QPushButton("뷰티샷 생성")
+            "create_scene": QPushButton("스튜디오 촬영")
         }
 
         positions = [(i, j) for i in range(2) for j in range(3)]

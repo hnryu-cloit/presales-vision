@@ -1,6 +1,12 @@
 import os
 from io import BytesIO
+import base64
+import io
+
 from PIL import Image
+import vertexai
+from vertexai.vision_models import Image as VertexImage, ImageGenerationModel
+
 from common.gemini import Gemini
 from common import prompt
 import tempfile
@@ -298,6 +304,42 @@ class ThumbnailWidget(QFrame):
         remove_btn.clicked.connect(lambda: self.removed.emit(self.image_path))
         layout.addWidget(remove_btn)
 
+class HistoryThumbnail(QFrame):
+    clicked = pyqtSignal(int)
+
+    def __init__(self, index, pixmap, description, is_selected=False, parent=None):
+        super().__init__(parent)
+        self.index = index
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFixedSize(230, 70)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Image
+        pixmap_label = QLabel()
+        pixmap_label.setFixedSize(60, 60)
+        pixmap_label.setPixmap(pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        pixmap_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(pixmap_label)
+
+        # Description
+        desc_label = QLabel(f"<b>Step {index + 1}</b><br>{description}")
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label, 1)
+
+        self.set_selected(is_selected)
+
+    def set_selected(self, selected):
+        if selected:
+            self.setStyleSheet("background-color: #E0EAFB; border: 1px solid #A23B72;")
+        else:
+            self.setStyleSheet("background-color: white; border: 1px solid #CCCCCC;")
+
+    def mousePressEvent(self, event):
+        self.clicked.emit(self.index)
+
+
 class AiEditorWidget(QWidget):
     back_requested = pyqtSignal()
     def __init__(self, parent=None):
@@ -306,11 +348,12 @@ class AiEditorWidget(QWidget):
         self.original_image_path = None
         self.vision_editor = VisionEditor()
 
-        # 카테고리별 레퍼런스 이미지 경로 저장
-        self.pose_reference = None
-        self.framing_reference = None
-        self.angle_reference = None
-        self.mood_reference = None
+        # Image History
+        self.image_history = []
+        self.history_index = -1
+
+
+
 
         self.init_ui()
 
@@ -372,10 +415,7 @@ class AiEditorWidget(QWidget):
             self.segment_button.setEnabled(True)
             self.segment_button.setText("전경/배경 분리")
 
-    def update_subject_options(self):
-        is_person = self.person_radio.isChecked()
-        self.person_options_widget.setVisible(is_person)
-        self.object_options_widget.setVisible(not is_person)
+
 
     def init_ui(self):
         # The main layout is now a QVBoxLayout to accommodate the bottom bar
@@ -433,22 +473,16 @@ class AiEditorWidget(QWidget):
         tools_layout.addWidget(self.upscale_btn)
         self.upscale_btn.clicked.connect(self.upscale_image)
 
-        self.expand_btn = QPushButton("생성형 확장")
-        tools_layout.addWidget(self.expand_btn)
-        self.expand_btn.clicked.connect(self.expand_image)
 
-        self.text_to_image_btn = QPushButton("텍스트로 새로 만들기")
-        tools_layout.addWidget(self.text_to_image_btn)
-        self.text_to_image_btn.clicked.connect(self.new_from_text)
 
 
         # Undo/Redo buttons (moved inside tools_layout)
         undo_redo_layout = QHBoxLayout()
-        self.undo_btn = QPushButton()
-        self.undo_btn.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)),"../resource/icon/backward.png")))
+        self.undo_btn = QPushButton("실행 취소")
+        self.undo_btn.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)),"resource/icon/backward.png")))
         self.undo_btn.setToolTip("실행 취소 (Ctrl+Z)")
-        self.redo_btn = QPushButton()
-        self.redo_btn.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)),"../resource/icon/next.png")))
+        self.redo_btn = QPushButton("다시 실행")
+        self.redo_btn.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)),"resource/icon/next.png")))
         self.redo_btn.setToolTip("다시 실행 (Ctrl+Y)")
 
         button_style = '''
@@ -456,7 +490,7 @@ class AiEditorWidget(QWidget):
                 background-color: #FFFFFF;
                 border: 1px solid #CCCCCC;
                 border-radius: 4px;
-                padding: 5px;
+                padding: 5px;res
             }
             QPushButton:hover {
                 background-color: #F0F0F0;
@@ -477,16 +511,7 @@ class AiEditorWidget(QWidget):
         ai_options_layout = QVBoxLayout(ai_options_panel)
 
         # 2.1 Subject Type
-        subject_group = QGroupBox("피사체 유형")
-        subject_layout = QHBoxLayout(subject_group)
-        self.person_radio = QRadioButton("인물")
-        self.object_radio = QRadioButton("사물/제품")
-        self.person_radio.setChecked(True)
-        self.person_radio.toggled.connect(self.update_subject_options)
-        self.object_radio.toggled.connect(self.update_subject_options)
-        subject_layout.addWidget(self.person_radio)
-        subject_layout.addWidget(self.object_radio)
-        ai_options_layout.addWidget(subject_group)
+        # 피사체 유형 섹션 제거
 
         # 2.2 Segmentation & Masking
         seg_group = QGroupBox("영역 선택 및 마스크")
@@ -504,130 +529,29 @@ class AiEditorWidget(QWidget):
         ai_options_layout.addWidget(seg_group)
 
         # 2.2 Detailed Controls
-        self.details_group = QGroupBox("상세 옵션")
-        self.details_group_layout = QVBoxLayout(self.details_group)
-
-        # Person-specific options container
-        self.person_options_widget = QWidget()
-        details_layout = QFormLayout(self.person_options_widget)
-        details_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.details_group_layout.addWidget(self.person_options_widget)
-
-        # Object-specific options container
-        self.object_options_widget = QWidget()
-        object_details_layout = QFormLayout(self.object_options_widget)
-        object_details_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.object_angle_combo = QComboBox()
-        self.object_angle_combo.addItems(["정면", "좌측면", "우측면", "45도 각도", "상단", "하단"])
-        object_details_layout.addRow("제품 각도:", self.object_angle_combo)
-        self.composition_combo = QComboBox()
-        self.composition_combo.addItems(["중앙 배치", "여백의 미", "패턴 반복"])
-        object_details_layout.addRow("구도:", self.composition_combo)
-        self.details_group_layout.addWidget(self.object_options_widget)
-        self.object_options_widget.setVisible(False)
-
-        ai_options_layout.addWidget(self.details_group)
-
-        # Pose section
-        self.pose_combo = QComboBox()
-        self.pose_combo.addItems([
-            "유지", "정자세", "걷는 포즈", "앉은 포즈", "기대는 포즈", 
-            "손 모션 포함", "다이나믹 포즈"
-        ])
-        self.pose_detail = QTextEdit()
-        self.pose_detail.setPlaceholderText("포즈에 대한 자세한 설명을 입력하세요.")
-        self.pose_detail.setMaximumHeight(100)
-        self.pose_detail.setVisible(False)
-        self.pose_combo.currentTextChanged.connect(self.on_pose_changed)
-
-        # Framing section  
-        self.framing_combo = QComboBox()
-        self.framing_combo.addItems([
-            "기본 구도 유지", "전신", "상반신", "하반신", "클로즈업",
-            "디테일 컷", "3/4 샷",
-        ])
-        self.framing_detail = QTextEdit()
-        self.framing_detail.setPlaceholderText("구도에 대한 자세한 설명을 입력하세요.")
-        self.framing_detail.setMaximumHeight(100)
-        self.framing_detail.setVisible(False)
-        self.framing_combo.currentTextChanged.connect(self.on_framing_changed)
-
-        # Angle section
-        self.angle_combo = QComboBox()
-        self.angle_combo.addItems([
-            "정면", "좌측면", "우측면", "45도 각도", "후면", 
-            "하이 앵글", "로우 앵글", "디테일 앵글"
-        ])
-        self.angle_detail = QTextEdit()
-        self.angle_detail.setPlaceholderText("촬영 각도에 대한 자세한 설명을 입력하세요.")
-        self.angle_detail.setMaximumHeight(100)
-        self.angle_detail.setVisible(False)
-        self.angle_combo.currentTextChanged.connect(self.on_angle_changed)
-
-        # Overall mood
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems([
-            "유지",
-            "심플/베이직",
-            "모던/미니멀",
-            "세련/럭셔리",
-            "캐주얼/데일리",
-            "스포티/액티브",
-            "러블리/페미닌",
-            "시크/도시적",
-            "빈티지/레트로",
-            "자연스러움/라이프스타일",
-            "시즌감 (봄/여름/가을/겨울)",
-            "직접입력"
-        ])
-
-        self.mood_detail = QTextEdit()
-        self.mood_detail.setPlaceholderText("전체적인 분위기와 컨셉을 입력하세요.")
-        self.mood_detail.setMaximumHeight(100)
-        self.mood_detail.setVisible(False)
-        self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
-
-        # Add all to layout
-        details_layout.addRow("포즈:", self.pose_combo)
-        details_layout.addRow("", self.pose_detail)
-        # 포즈 레퍼런스 업로드 버튼
-        self.pose_ref_btn = QPushButton("레퍼런스 업로드")
-        self.pose_ref_btn.setVisible(False)
-        self.pose_ref_btn.clicked.connect(lambda: self.upload_reference_image('pose'))
-        details_layout.addRow("", self.pose_ref_btn)
-
-        details_layout.addRow("구도:", self.framing_combo)
-        details_layout.addRow("", self.framing_detail)
-        # 구도 레퍼런스 업로드 버튼
-        self.framing_ref_btn = QPushButton("레퍼런스 업로드")
-        self.framing_ref_btn.setVisible(False)
-        self.framing_ref_btn.clicked.connect(lambda: self.upload_reference_image('framing'))
-        details_layout.addRow("", self.framing_ref_btn)
-
-        details_layout.addRow("촬영 방향:", self.angle_combo)
-        details_layout.addRow("", self.angle_detail)
-        # 촬영 방향 레퍼런스 업로드 버튼
-        self.angle_ref_btn = QPushButton("레퍼런스 업로드")
-        self.angle_ref_btn.setVisible(False)
-        self.angle_ref_btn.clicked.connect(lambda: self.upload_reference_image('angle'))
-        details_layout.addRow("", self.angle_ref_btn)
-
-        details_layout.addRow("분위기:", self.mode_combo)
-        details_layout.addRow("", self.mood_detail)
-        # 분위기 레퍼런스 업로드 버튼
-        self.mood_ref_btn = QPushButton("레퍼런스 업로드")
-        self.mood_ref_btn.setVisible(False)
-        self.mood_ref_btn.clicked.connect(lambda: self.upload_reference_image('mood'))
-        details_layout.addRow("", self.mood_ref_btn)
-
-        # 초기 상태에서 이미 입력된 내용이 있으면 표시
-        self.update_all_visibility()
+        # 상세 옵션 UI가 제거되었습니다.
         
         # Add stretch to align bottom with reference image layout
         ai_options_layout.addStretch()
 
         # Add panels to left container
         left_main_layout.addWidget(tools_panel)
+
+        # History Panel
+        history_panel = QGroupBox("히스토리")
+        history_panel_layout = QVBoxLayout(history_panel)
+        self.history_scroll_area = QScrollArea()
+        self.history_scroll_area.setWidgetResizable(True)
+        self.history_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.history_scroll_area.setMinimumHeight(300)
+        self.history_widget = QWidget()
+        self.history_layout = QVBoxLayout(self.history_widget)
+        self.history_layout.setContentsMargins(0,0,0,0)
+        self.history_layout.setSpacing(3)
+        self.history_layout.addStretch()
+        self.history_scroll_area.setWidget(self.history_widget)
+        history_panel_layout.addWidget(self.history_scroll_area)
+        left_main_layout.addWidget(history_panel)
         left_main_layout.addWidget(ai_options_panel)
 
         # --- Center/Right Panel ---
@@ -835,21 +759,8 @@ class AiEditorWidget(QWidget):
             self.update_image_grid(grid_widget)
 
     def remove_image_card(self, image_path, grid_widget):
-        # 카테고리별 레퍼런스 이미지 확인 및 삭제
-        if self.pose_reference == image_path:
-            self.pose_reference = None
-            self.pose_ref_btn.setText("레퍼런스 업로드")
-        elif self.framing_reference == image_path:
-            self.framing_reference = None
-            self.framing_ref_btn.setText("레퍼런스 업로드")
-        elif self.angle_reference == image_path:
-            self.angle_reference = None
-            self.angle_ref_btn.setText("레퍼런스 업로드")
-        elif self.mood_reference == image_path:
-            self.mood_reference = None
-            self.mood_ref_btn.setText("레퍼런스 업로드")
         # 아이템 레퍼런스 이미지 확인 및 삭제
-        elif image_path in grid_widget.image_paths:
+        if image_path in grid_widget.image_paths:
             grid_widget.image_paths.remove(image_path)
 
         self.update_image_grid(grid_widget)
@@ -865,19 +776,7 @@ class AiEditorWidget(QWidget):
                 child.widget().deleteLater()
 
         # Add category reference images with tags first
-        category_images = []
-        if self.pose_reference:
-            category_images.append((self.pose_reference, "포즈"))
-        if self.framing_reference:
-            category_images.append((self.framing_reference, "구도"))
-        if self.angle_reference:
-            category_images.append((self.angle_reference, "촬영방향"))
-        if self.mood_reference:
-            category_images.append((self.mood_reference, "분위기"))
-
-        for image_path, tag in category_images:
-            card = self.create_image_card(image_path, grid_widget, tag)
-            layout.addWidget(card)
+        # 카테고리 레퍼런스 기능 제거
 
         # Add item reference images (no tags)
         for image_path in grid_widget.image_paths:
@@ -917,40 +816,7 @@ class AiEditorWidget(QWidget):
                 self.text_to_image_btn.setEnabled(True)
                 self.text_to_image_btn.setText("텍스트로 새로 만들기")
 
-    def expand_image(self):
-        if not self.original_image_path:
-            QMessageBox.warning(self, "이미지 없음", "편집할 이미지를 먼저 로드해주세요.")
-            return
 
-        try:
-            self.expand_btn.setEnabled(False)
-            self.expand_btn.setText("확장 중...")
-            QApplication.processEvents() # Update UI
-
-            # Get original image bytes
-            original_pixmap = self.image_viewer._photo.pixmap()
-            buffer = QBuffer()
-            buffer.open(QIODevice.WriteOnly)
-            original_pixmap.save(buffer, "PNG")
-            image_bytes = buffer.data()
-
-            # Call expand
-            expanded_bytes = self.vision_editor.expand_image(image_bytes)
-
-            if expanded_bytes:
-                image_applied = self._show_image_popup(expanded_bytes, "확장된 이미지")
-                if image_applied:
-                    print("확장된 이미지가 편집기에 적용되었습니다.")
-                else:
-                    print("사용자가 이미지 적용을 취소했습니다.")
-            else:
-                QMessageBox.warning(self, "오류", "이미지 확장에 실패했습니다.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "오류", f"확장 중 오류 발생: {e}")
-        finally:
-            self.expand_btn.setEnabled(True)
-            self.expand_btn.setText("생성형 확장")
 
     def upscale_image(self):
         if not self.original_image_path:
@@ -1007,191 +873,17 @@ class AiEditorWidget(QWidget):
         redo_action.triggered.connect(self.image_viewer.redo)
         self.addAction(redo_action)
 
-    def on_pose_changed(self, text):
-        """포즈 콤보박스 변경시 상세 입력창 표시/숨김"""
-        if text == "유지":
-            self.pose_detail.setVisible(False)
-            self.pose_ref_btn.setVisible(False)
-        else:
-            self.pose_detail.setVisible(True)
-            self.pose_ref_btn.setVisible(True)
 
-            # 다른 카테고리들은 내용이 있으면 유지, 없으면 숨김
-            self.framing_detail.setVisible(bool(self.framing_detail.toPlainText().strip()) and self.framing_combo.currentText() != "기존 구도 유지")
-            self.framing_ref_btn.setVisible(bool(self.framing_detail.toPlainText().strip()) and self.framing_combo.currentText() != "기존 구도 유지")
-            self.angle_detail.setVisible(bool(self.angle_detail.toPlainText().strip()) and self.angle_combo.currentText() != "정면")
-            self.angle_ref_btn.setVisible(bool(self.angle_detail.toPlainText().strip()) and self.angle_combo.currentText() != "정면")
-            self.mood_detail.setVisible(bool(self.mood_detail.toPlainText().strip()) and self.mode_combo.currentText() != "유지")
-            self.mood_ref_btn.setVisible(bool(self.mood_detail.toPlainText().strip()) and self.mode_combo.currentText() != "유지")
-
-            # 각 포즈별 도움말 설정
-            placeholders = {
-                "정자세": "예: 자연스럽게 서있는 자세로, 어깨는 편안히 내리고...",
-                "걷는 포즈": "예: 런웨이 느낌으로 자연스러운 보폭으로 걸어가는 모습...",
-                "앉은 포즈": "예: 의자나 바닥에 앉아서, 다리 위치와 상체 자세는...",
-                "기대는 포즈": "예: 벽이나 난간에 기대어서, 팔과 다리 위치는...",
-                "손 모션 포함": "예: 허리에 손을 얹거나 주머니에 넣는 등의 자연스러운 손동작...",
-                "다이나믹 포즈": "예: 점프하거나 턴하는 등 움직임이 느껴지는 역동적인 자세...",
-                "라이프스타일 포즈": "예: 책을 읽거나 커피를 마시는 등 일상적인 행동하는 모습..."
-            }
-            self.pose_detail.setPlaceholderText(placeholders.get(text, "포즈에 대한 자세한 설명을 입력하세요..."))
-
-    def on_framing_changed(self, text):
-        """구도 콤보박스 변경시 상세 입력창 표시/숨김"""
-        if text == "기존 구도 유지":
-            self.framing_detail.setVisible(False)
-            self.framing_ref_btn.setVisible(False)
-        else:
-            self.framing_detail.setVisible(True)
-            self.framing_ref_btn.setVisible(True)
-
-            # 다른 카테고리들은 내용이 있으면 유지, 없으면 숨김
-            self.pose_detail.setVisible(bool(self.pose_detail.toPlainText().strip()) and self.pose_combo.currentText() != "유지")
-            self.pose_ref_btn.setVisible(bool(self.pose_detail.toPlainText().strip()) and self.pose_combo.currentText() != "유지")
-            self.angle_detail.setVisible(bool(self.angle_detail.toPlainText().strip()) and self.angle_combo.currentText() != "정면")
-            self.angle_ref_btn.setVisible(bool(self.angle_detail.toPlainText().strip()) and self.angle_combo.currentText() != "정면")
-            self.mood_detail.setVisible(bool(self.mood_detail.toPlainText().strip()) and self.mode_combo.currentText() != "유지")
-            self.mood_ref_btn.setVisible(bool(self.mood_detail.toPlainText().strip()) and self.mode_combo.currentText() != "유지")
-
-            # 각 구도별 도움말 설정
-            placeholders = {
-                "전신": "예: 머리부터 발끝까지 전체 의상이 다 보이도록...",
-                "상반신": "예: 허리 위쪽 위주로 상의와 액세서리가 잘 보이도록...",
-                "하반신": "예: 허리 아래쪽 위주로 하의와 신발이 강조되도록...",
-                "클로즈업": "예: 얼굴과 상의 디테일이 잘 보이도록 가슴 위까지...",
-                "디테일 컷": "예: 소매나 소재 질감, 패턴 등 특정 부위를 확대해서...",
-                "3/4 샷": "예: 허벅지 위부터 머리까지 3/4 정도 비율로...",
-                "라이프스타일 컷": "예: 배경 포함하여 상황과 분위기를 연출하는 구도로..."
-            }
-            self.framing_detail.setPlaceholderText(placeholders.get(text, "구도에 대한 자세한 설명을 입력하세요..."))
-
-    def on_angle_changed(self, text):
-        """촬영 방향 콤보박스 변경시 상세 입력창 표시/숨김"""
-        if text == "정면":
-            self.angle_detail.setVisible(False)
-            self.angle_ref_btn.setVisible(False)
-        else:
-            self.angle_detail.setVisible(True)
-            self.angle_ref_btn.setVisible(True)
-
-            # 다른 카테고리들은 내용이 있으면 유지, 없으면 숨김
-            self.pose_detail.setVisible(bool(self.pose_detail.toPlainText().strip()) and self.pose_combo.currentText() != "유지")
-            self.pose_ref_btn.setVisible(bool(self.pose_detail.toPlainText().strip()) and self.pose_combo.currentText() != "유지")
-            self.framing_detail.setVisible(bool(self.framing_detail.toPlainText().strip()) and self.framing_combo.currentText() != "기존 구도 유지")
-            self.framing_ref_btn.setVisible(bool(self.framing_detail.toPlainText().strip()) and self.framing_combo.currentText() != "기존 구도 유지")
-            self.mood_detail.setVisible(bool(self.mood_detail.toPlainText().strip()) and self.mode_combo.currentText() != "유지")
-            self.mood_ref_btn.setVisible(bool(self.mood_detail.toPlainText().strip()) and self.mode_combo.currentText() != "유지")
-
-            # 각 앵글별 도움말 설정
-            placeholders = {
-                "좌측면": "예: 왼쪽에서 바라본 각도로 옆라인이 잘 보이도록...",
-                "우측면": "예: 오른쪽에서 바라본 각도로 옆라인이 잘 보이도록...",
-                "45도 각도": "예: 3/4 뷰 각도로 정면과 옆면이 적절히 섞인 각도로...",
-                "후면": "예: 뒷모습이 강조되도록 등과 뒤태가 잘 보이는 각도로...",
-                "하이 앵글": "예: 위에서 내려다보는 각도로 전체적인 실루엣이 보이도록...",
-                "로우 앵글": "예: 아래에서 올려다보는 각도로 역동적이고 강렬한 느낌으로...",
-                "디테일 앵글": "예: 특정 아이템이나 부위에 포커스를 맞춘 각도로..."
-            }
-            self.angle_detail.setPlaceholderText(placeholders.get(text, "촬영 각도에 대한 자세한 설명을 입력하세요..."))
-
-    def on_mode_changed(self, text):
-        """분위기 콤보박스 변경시 상세 입력창의 placeholder text 업데이트"""
-        if text == "유지":
-            self.mood_detail.setVisible(False)
-            self.mood_ref_btn.setVisible(False)
-        else:
-            self.mood_detail.setVisible(True)
-            self.mood_ref_btn.setVisible(True)
-
-            # 다른 카테고리들은 내용이 있으면 유지, 없으면 숨김
-            self.pose_detail.setVisible(bool(self.pose_detail.toPlainText().strip()) and self.pose_combo.currentText() != "유지")
-            self.pose_ref_btn.setVisible(bool(self.pose_detail.toPlainText().strip()) and self.pose_combo.currentText() != "유지")
-            self.framing_detail.setVisible(bool(self.framing_detail.toPlainText().strip()) and self.framing_combo.currentText() != "기존 구도 유지")
-            self.framing_ref_btn.setVisible(bool(self.framing_detail.toPlainText().strip()) and self.framing_combo.currentText() != "기존 구도 유지")
-            self.angle_detail.setVisible(bool(self.angle_detail.toPlainText().strip()) and self.angle_combo.currentText() != "정면")
-            self.angle_ref_btn.setVisible(bool(self.angle_detail.toPlainText().strip()) and self.angle_combo.currentText() != "정면")
-
-            placeholders = {
-                "심플/베이직": "예: 흰색 배경에 그림자 없는 깔끔한 조명",
-                "모던/미니멀": "예: 직선적인 구도와 차가운 색감의 배경",
-                "세련/럭셔리": "예: 고급스러운 소품과 은은한 조명 활용",
-                "캐주얼/데일리": "예: 카페나 길거리 등 일상적인 배경",
-                "스포티/액티브": "예: 역동적인 구도와 야외 배경",
-                "러블리/페미닌": "예: 파스텔톤 색감과 부드러운 자연광",
-                "시크/도시적": "예: 야경이나 도시의 건축물을 배경으로",
-                "빈티지/레트로": "예: 필름 카메라 느낌의 색감과 소품",
-                "자연스러움/라이프스타일": "예: 여행지나 집과 같은 자연스러운 공간",
-                "시즌감 (봄/여름/가을/겨울)": "예: 계절에 맞는 야외 배경과 색감",
-                "직접입력": "원하는 분위기를 직접 입력하세요."
-            }
-            self.mood_detail.setPlaceholderText(placeholders.get(text, "전체적인 분위기와 컨셉을 입력하세요."))
-
-    def update_all_visibility(self):
-        """초기화 시 또는 필요시 모든 카테고리의 visibility 업데이트"""
-        # 포즈
-        if self.pose_combo.currentText() != "유지" and self.pose_detail.toPlainText().strip():
-            self.pose_detail.setVisible(True)
-            self.pose_ref_btn.setVisible(True)
-        else:
-            self.pose_detail.setVisible(self.pose_combo.currentText() != "유지")
-            self.pose_ref_btn.setVisible(self.pose_combo.currentText() != "유지")
-
-        # 구도
-        if self.framing_combo.currentText() != "기존 구도 유지" and self.framing_detail.toPlainText().strip():
-            self.framing_detail.setVisible(True)
-            self.framing_ref_btn.setVisible(True)
-        else:
-            self.framing_detail.setVisible(self.framing_combo.currentText() != "기존 구도 유지")
-            self.framing_ref_btn.setVisible(self.framing_combo.currentText() != "기존 구도 유지")
-
-        # 촬영 방향
-        if self.angle_combo.currentText() != "정면" and self.angle_detail.toPlainText().strip():
-            self.angle_detail.setVisible(True)
-            self.angle_ref_btn.setVisible(True)
-        else:
-            self.angle_detail.setVisible(self.angle_combo.currentText() != "정면")
-            self.angle_ref_btn.setVisible(self.angle_combo.currentText() != "정면")
-
-        # 분위기
-        if self.mode_combo.currentText() != "유지" and self.mood_detail.toPlainText().strip():
-            self.mood_detail.setVisible(True)
-            self.mood_ref_btn.setVisible(True)
-        else:
-            self.mood_detail.setVisible(self.mode_combo.currentText() != "유지")
-            self.mood_ref_btn.setVisible(self.mode_combo.currentText() != "유지")
-
-    def upload_reference_image(self, category):
-        """카테고리별 레퍼런스 이미지 업로드"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            f"{category} 레퍼런스 이미지 선택",
-            "",
-            "Image files (*.png *.jpg *.jpeg)"
-        )
-
-        if file_path:
-            # 카테고리별로 이미지 경로 저장
-            if category == 'pose':
-                self.pose_reference = file_path
-                self.pose_ref_btn.setText(f"포즈 레퍼런스: {os.path.basename(file_path)}")
-            elif category == 'framing':
-                self.framing_reference = file_path
-                self.framing_ref_btn.setText(f"구도 레퍼런스: {os.path.basename(file_path)}")
-            elif category == 'angle':
-                self.angle_reference = file_path
-                self.angle_ref_btn.setText(f"방향 레퍼런스: {os.path.basename(file_path)}")
-            elif category == 'mood':
-                self.mood_reference = file_path
-                self.mood_ref_btn.setText(f"분위기 레퍼런스: {os.path.basename(file_path)}")
-
-            # 레퍼런스 이미지 그리드 업데이트
-            self.update_image_grid(self.image_grid_widget)
 
     def load_image(self, image_path):
         self.original_image_path = image_path
         pixmap = QPixmap(image_path)
         if not pixmap.isNull():
-            self.image_viewer.set_photo(pixmap)
+            # This is a new image, so it starts a new history
+            self.image_history = []
+            self.history_index = -1
+            self.image_viewer.set_photo(pixmap) # set_photo must be called before add_to_history
+            self.add_to_history(pixmap, "원본 이미지 로드")
 
     # yhkim1
     def _show_image_popup(self, image_bytes: bytes, title: str = "Image Popup"):
@@ -1207,6 +899,7 @@ class AiEditorWidget(QWidget):
             if result == QDialog.Accepted:
                 # 재생성된 이미지를 현재 편집기의 이미지 뷰어에 적용
                 self.image_viewer.set_photo(dialog.pixmap)
+                self.add_to_history(dialog.pixmap, title) # Add to history
                 return True
             return False
         except Exception as e:
@@ -1338,7 +1031,8 @@ class AiEditorWidget(QWidget):
 
             # edit_data에서 사용할 옵션값만 추출
             keys_to_extract = ['action', 'framing', 'angle', 'mood', 'user_prompt']
-            extracted_edit_data = {key: edit_data[key] for key in keys_to_extract}
+            extracted_edit_data = {key: edit_data.get(key) for key in keys_to_extract}
+            extracted_edit_data = {k: v for k, v in extracted_edit_data.items() if v is not None}
 
             generated_image_shot = self.vision_editor.regenerate_image_shot(
                 source_image=generated_image,
@@ -1399,38 +1093,7 @@ class AiEditorWidget(QWidget):
             'reference': reference_data['item']
         }
 
-        if self.person_radio.isChecked():
-            edit_data.update({
-                'action': {
-                    'option': self.pose_combo.currentText(),
-                    'description': self.pose_detail.toPlainText() if self.pose_detail.isVisible() else '',
-                    'reference': reference_data['pose'] if reference_data['pose'] else ""
-                },
-                'framing': {
-                    'option': self.framing_combo.currentText(),
-                    'description': self.framing_detail.toPlainText() if self.framing_detail.isVisible() else '',
-                    'reference': reference_data['framing'] if reference_data['framing'] else ""
-                },
-                'angle': {
-                    'option': self.angle_combo.currentText(),
-                    'description': self.angle_detail.toPlainText() if self.angle_detail.isVisible() else '',
-                    'reference': reference_data['angle'] if reference_data['angle'] else ""
-                },
-                'mood': {
-                    'option': self.mode_combo.currentText(),
-                    'description': self.mood_detail.toPlainText() if self.mood_detail.isVisible() else '',
-                    'reference': reference_data['mood'] if reference_data['mood'] else ""
-                }
-            })
-        else: # Object is checked
-            edit_data.update({
-                'object_angle': {
-                    'option': self.object_angle_combo.currentText(),
-                },
-                'composition': {
-                    'option': self.composition_combo.currentText(),
-                }
-            })
+
 
         return edit_data
 
@@ -1444,12 +1107,54 @@ class AiEditorWidget(QWidget):
 
     def get_reference_data(self):
         return {
-            'item': [path for path in getattr(self.image_grid_widget, 'image_paths', [])],
-            'pose': self.pose_reference if self.pose_reference else None,
-            'framing': self.framing_reference if self.framing_reference else None,
-            'angle': self.angle_reference if self.angle_reference else None,
-            'mood': self.mood_reference if self.mood_reference else None
+            'item': [path for path in getattr(self.image_grid_widget, 'image_paths', [])]
         }
+
+    def add_to_history(self, pixmap, description=""):
+        # If we are not at the end of the history (i.e., we did an undo), truncate the future
+        if self.history_index < len(self.image_history) - 1:
+            self.image_history = self.image_history[:self.history_index + 1]
+
+        # Add new state
+        self.image_history.append({"pixmap": pixmap.copy(), "description": description})
+        self.history_index = len(self.image_history) - 1
+
+        # Update UI
+        self.update_history_panel()
+        self.update_history_buttons(False, False)
+
+    def update_history_panel(self):
+        # Clear existing widgets
+        while self.history_layout.count() > 1: # Keep the stretch
+            child = self.history_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        for i, item in enumerate(self.image_history):
+            is_selected = (i == self.history_index)
+            thumbnail = HistoryThumbnail(i, item["pixmap"], item["description"], is_selected)
+            thumbnail.clicked.connect(self.load_from_history)
+            self.history_layout.insertWidget(self.history_layout.count() - 1, thumbnail)
+
+        # Ensure the selected item is visible
+        if self.history_index >= 0:
+            QApplication.processEvents()
+            last_added_widget = self.history_layout.itemAt(self.history_index).widget()
+            if last_added_widget:
+                self.history_scroll_area.ensureWidgetVisible(last_added_widget)
+
+    def load_from_history(self, index):
+        if 0 <= index < len(self.image_history):
+            self.history_index = index
+            item = self.image_history[index]
+            self.image_viewer.set_photo(item["pixmap"]) # This resets mask history, which is fine
+
+            self.update_history_panel()
+            self.update_history_buttons(False, False)
+
+    def update_history_buttons(self, undo_enabled, redo_enabled):
+        self.undo_btn.setEnabled(undo_enabled)
+        self.redo_btn.setEnabled(redo_enabled)
 
 
 
@@ -1561,25 +1266,7 @@ class VisionEditor():
             return generated_image_data[0].data
         return None
 
-    def expand_image(self, source_image: bytes) -> bytes:
-        """
-        이미지를 확장하고 AI로 채웁니다.
-        """
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f_src:
-            f_src.write(source_image)
-            source_image_path = f_src.name
 
-        try:
-            p = "Expand the given image to 1.5 times its original size, maintaining the aspect ratio. The new areas should be filled with content that seamlessly blends with the original image."
-            image_files = [source_image_path]
-            
-            generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=image_files)
-
-            if generated_image_data:
-                return generated_image_data[0].data
-            return None
-        finally:
-            os.unlink(source_image_path)
 
     def upscale_image(self, source_image: bytes) -> bytes:
         """

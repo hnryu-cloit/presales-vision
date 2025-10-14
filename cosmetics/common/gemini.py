@@ -153,6 +153,21 @@ class Gemini:
         prompt = f"""다음은 사용자가 입력한 이미지 생성 프롬프트입니다: '{user_prompt}'. 이 프롬프트를 더 창의적이고 상세하게 만들어주세요. 이미지 생성에 가장 적합한 형태로, 영어로 작성해주세요."""
         return self.call_gemini_text(prompt)
 
+    def close(self):
+        """
+        Closes the underlying Gemini client.
+        This is to prevent resource warnings on shutdown.
+        """
+        # The client used here is synchronous, but the error suggests an async client somewhere.
+        # This is a speculative fix. The google.generativeai library might not have a close method on the sync client.
+        if hasattr(self.client, 'close') and callable(getattr(self.client, 'close')):
+            try:
+                # This might fail if close is an async method.
+                self.client.close()
+                print("Attempted to close Gemini client.")
+            except Exception as e:
+                print(f"An error occurred while trying to close the Gemini client: {e}")
+
     @retry_with_delay
     def call_image_generator(self, prompt, image_files):
         """
