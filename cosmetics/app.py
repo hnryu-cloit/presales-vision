@@ -204,12 +204,12 @@ class AIGeneratorApp(QMainWindow):
         nav_layout = QHBoxLayout()
         nav_layout.addStretch(1)
         self.prev_button = QPushButton("← 이전")
-        self.next_button = QPushButton("생성 →")
+        self.next_button = QPushButton("다음 →")
 
         for btn in [self.prev_button, self.next_button]:
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #007bff;
+                    background: #A23B72;
                     color: white;
                     border: none;
                     border-radius: 6px;
@@ -218,8 +218,8 @@ class AIGeneratorApp(QMainWindow):
                     font-weight: 500;
                     min-width: 60px;
                 }
-                QPushButton:hover { background: #0056b3; }
-                QPushButton:pressed { background: #004085; }
+                QPushButton:hover { background: #8A2F5F; }
+                QPushButton:pressed { background: #6D2349; }
                 QPushButton:disabled { background: #6c757d; color: #dee2e6; }
             """)
 
@@ -530,6 +530,8 @@ class AIGeneratorApp(QMainWindow):
         self.results_grid_layout = QGridLayout(group)
         layout.addWidget(group)
 
+        layout.addStretch(1) # Push content to the top
+
         scroll_area.setWidget(page)
         return scroll_area
 
@@ -606,7 +608,7 @@ class AIGeneratorApp(QMainWindow):
         self.next_button.setEnabled(step_index < self.stacked_widget.count() - 1)
         
         if step_index == 0:
-            self.next_button.setText("생성 →")
+            self.next_button.setText("다음 →")
         elif step_index == 2: # Editor page
             self.next_button.setText("최종 저장")
         elif step_index == self.stacked_widget.count() - 1: # Results page
@@ -744,7 +746,7 @@ class AIGeneratorApp(QMainWindow):
         self.update_workflow_ui(2)
         
         # 네비게이션 버튼 텍스트 업데이트
-        self.next_button.setText("결과 확인 →")
+        self.next_button.setText("결과 저장")
 
 
 if __name__ == '__main__':
