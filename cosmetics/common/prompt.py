@@ -165,19 +165,42 @@ PRODUCT_DESCRIPTION = """
     """
 
 
+# CHANGE_ATTRIBUTES = """
+#     너는 정밀한 이미지 합성 전문가다. 지금부터 아래의 단계별 지침에 따라 작업을 수행한다.
+#
+#     **[1단계: 영역 분석]**
+#     주어진 원본 이미지에서 '제품 영역'과 '배경 영역'을 완벽하게 분리하여 인식한다.
+#
+#     **[2단계: 제품 보존 (절대 규칙)]**
+#     '제품 영역'은 원본의 모양, 색상, 로고, 라벨, 크기, 위치를 단 1픽셀도 변경하지 않고 그대로 유지한다. 이것은 최우선 규칙이다.
+#
+#     **[3단계: 배경 생성]**
+#     '배경 영역'을 아래 [변경 요청 사항]에 맞춰 새롭게 생성한다.
+#     - **변경 요청 사항:** {instructions}
+#
+#     **[4단계: 자연스러운 합성]**
+#     보존된 '제품 영역'과 새로 생성된 '배경 영역'을 합성한다.
+#
+#     최종 결과물은 이질감 없이 완벽하게 합성된 한 장의 사진이어야 한다.
+#     """
+
 CHANGE_ATTRIBUTES = """
-    주어진 화장품 이미지의 특정 속성을 변경하여 새로운 이미지를 생성해주세요.
+    The first attached image is the original, and the images from the second one onwards are reference images.
+    In the original image, please keep the area with the product as it is, and modify the marked area or the area outside the product according to the description below.
     
-    **변경 요청 사항:** {instructions}
+    # Fixed Area (Masked Area)
+    - The cosmetic product in the center of the image (all parts of the product, including the container, logo, label, etc.)
     
-    **제약 조건:**
-    - 제품의 고유 형태(용기 모양, 크기, 구조)는 반드시 유지
-    - 브랜드 로고 및 라벨 위치 유지
-    - 요청된 사항만 자연스럽게 수정
+    # Area to Reconstruct (Area to Inpaint)
+    - All background and surrounding elements, excluding the product.
     
-    **변경 가능 요소:** 배경, 조명, 색상 톤, 소품, 질감 표현, 구도 등
+    # **Reconstruction Guide**
+    - {instructions}
     
-    전체 분위기에 어울리지도록 이미지 생성해줘.
+    # Important Conditions
+    - The shape, color, and content of the 'Fixed Area' must absolutely not be altered.
+    - The boundary between the 'Fixed Area' and the 'Area to Reconstruct' must be blended as naturally as possible.
+    - If a reference image exists, the 'background' of the reference image must not be damaged.
     """
 
 CREATE_THUMBNAIL_WITH_METADATA = """

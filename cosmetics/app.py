@@ -46,24 +46,24 @@ class ImageGenerationThread(QThread):
 class AIGeneratorApp(QMainWindow):
     FEATURE_TOOLTIPS = {
         "속성 변경": {
-            "short": "촬영 방향, 색상, 조명 등 변경 (제품 형태 유지)",
-            "detail": "촬영 방향, 색상, 조명 등을 자유롭게 수정하면서 제품의 고유한 형태와 디자인은 그대로 유지합니다."
+            "short": "Change shooting angle, color, lighting, etc. (maintaining product form)",
+            "detail": "Freely modify the shooting angle, color, and lighting while keeping the product's unique form and design intact."
         },
         "썸네일 생성": {
-            "short": "상세페이지 분석, 최적화 썸네일 이미지 생성",
-            "detail": "상세페이지 이미지를 분석하여 SNS, 광고에 최적화된 고퀄리티 썸네일을 자동으로 만들어드립니다."
+            "short": "Analyze product page, generate optimized thumbnail images",
+            "detail": "Analyzes the product detail page to automatically create high-quality thumbnails optimized for social media and advertisements."
         },
         "스타일 적용": {
-            "short": "레퍼런스 이미지의 조명/색감/분위기 복제 적용",
-            "detail": "마음에 드는 이미지의 조명, 색감, 분위기를 분석하여 내 제품에 동일한 스타일을 적용합니다."
+            "short": "Apply the lighting/color scheme/mood from a reference image",
+            "detail": "Analyzes the lighting, color scheme, and mood of an image you like and applies the same style to your product."
         },
         "객체 교체": {
-            "short": "레퍼런스 이미지 속 특정 제품을 자사 제품으로 자연스럽게 합성",
-            "detail": "레퍼런스 이미지의 특정 제품 위치에 자사 제품을 자연스럽게 합성합니다. 조명과 그림자까지 자동 조정됩니다."
+            "short": "Seamlessly composite your product in place of an object in a reference image",
+            "detail": "Seamlessly composites your product into the position of a specific object in a reference image. Lighting and shadows are adjusted automatically."
         },
         "스튜디오 촬영": {
-            "short": "여러 제품을 하나의 공간에 배치한 제품 연출 스틸컷 생성",
-            "detail": "여러 제품을 하나의 공간(스튜디오, 화장대, 욕실 등)에 배치한 자연스러운 생활 장면을 만들어드립니다."
+            "short": "Create styled product still cuts by arranging multiple products in one space",
+            "detail": "Creates natural lifestyle scenes by placing multiple products in a single space (e.g., a studio, vanity, bathroom)."
         }
     }
 
