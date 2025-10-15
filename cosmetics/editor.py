@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QGroupBox, QComboBox, QTextEdit,QGraphicsView, QLineEdit,
     QGraphicsScene, QGraphicsPixmapItem, QFrame,
     QSlider, QRadioButton, QButtonGroup, QFormLayout, QColorDialog, QAction, QMessageBox,
-    QDialog, QScrollArea, QInputDialog
+    QDialog, QScrollArea, QInputDialog, QGridLayout, QCheckBox
 )
 
 from PyQt5.QtCore import Qt, QPoint, QRectF, pyqtSignal, QThread, QBuffer, QIODevice
@@ -54,6 +54,85 @@ class ImagePopup(QDialog):
 
         layout.addLayout(button_layout)
         self.setLayout(layout)
+
+
+class FinalSaveDialog(QDialog):
+    def __init__(self, history, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("최종 저장할 이미지 선택")
+        self.setModal(True)
+        self.setMinimumSize(600, 400)
+
+        self.history = history
+        self.checkboxes = []
+
+        main_layout = QVBoxLayout(self)
+
+        # Scroll Area for the grid
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        content_widget = QWidget()
+        scroll_area.setWidget(content_widget)
+        grid_layout = QGridLayout(content_widget)
+        grid_layout.setSpacing(10)
+
+        # Populate grid
+        for i, item in enumerate(self.history):
+            row, col = i // 3, i % 3
+
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container.setContentsMargins(0,0,0,0)
+
+            pixmap = item["pixmap"]
+            image_path = item["image_path"]
+
+            img_label = QLabel()
+            img_label.setPixmap(pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            img_label.setAlignment(Qt.AlignCenter)
+
+            checkbox = QCheckBox(f"Step {i+1}")
+            checkbox.setProperty("image_path", image_path) # Store path in property
+
+            container_layout.addWidget(img_label)
+            container_layout.addWidget(checkbox)
+            self.checkboxes.append(checkbox)
+
+            grid_layout.addWidget(container, row, col)
+
+        main_layout.addWidget(scroll_area)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_button = QPushButton("취소")
+        cancel_button.clicked.connect(self.reject)
+        
+        save_button = QPushButton("저장")
+        save_button.setDefault(True)
+        save_button.clicked.connect(self.on_save)
+        
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(save_button)
+        
+        main_layout.addLayout(button_layout)
+
+    def on_save(self):
+        self.selected_paths = []
+        for checkbox in self.checkboxes:
+            if checkbox.isChecked():
+                self.selected_paths.append(checkbox.property("image_path"))
+        
+        if not self.selected_paths:
+            QMessageBox.warning(self, "선택 없음", "저장할 이미지를 하나 이상 선택해주세요.")
+            return
+
+        self.accept()
+
+    def get_selected_paths(self):
+        return self.selected_paths
+
 
 
 class PhotoViewer(QGraphicsView):
@@ -342,6 +421,8 @@ class HistoryThumbnail(QFrame):
 
 class AiEditorWidget(QWidget):
     back_requested = pyqtSignal()
+    finalSaveCompleted = pyqtSignal(list)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.reference_paths = []
@@ -562,6 +643,29 @@ class AiEditorWidget(QWidget):
         # 1. Image Viewer
         image_viewer_group = QGroupBox("이미지 편집")
         image_viewer_layout = QVBoxLayout(image_viewer_group)
+
+        # Layout for title and final save button
+        title_layout = QHBoxLayout()
+        title_label = QLabel("이미지 편집") # Re-add a label for the title
+        title_layout.addWidget(title_label, 1)
+        self.final_save_btn = QPushButton("최종 저장")
+        self.final_save_btn.clicked.connect(self.open_final_save_dialog)
+        self.final_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745; 
+                color: white; 
+                padding: 5px 10px; 
+                font-weight: bold;
+                border-radius: 5px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #218838; }
+            QPushButton:pressed { background-color: #1e7e34; }
+        """)
+        title_layout.addWidget(self.final_save_btn)
+        image_viewer_layout.addLayout(title_layout)
+
+
         self.image_viewer = PhotoViewer(self)
         self.brush_group.buttonClicked.connect(self.image_viewer.set_draw_mode)
         self.brush_slider.valueChanged.connect(self.image_viewer.set_brush_size)
@@ -633,10 +737,8 @@ class AiEditorWidget(QWidget):
         self.apply_button = QPushButton("적용하기")
         self.apply_button.setMinimumHeight(40)
         self.apply_button.setMinimumWidth(100)
-        # Check if icon exists before setting
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../resource/icon/checked.png")
-        if os.path.exists(icon_path):
-            self.apply_button.setIcon(QIcon(icon_path))
+        self.apply_button.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "resource/icon/ai-editor.png")))
+
         self.apply_button.setStyleSheet("""
             QPushButton {
                 background-color: #A23B72; 
@@ -886,7 +988,7 @@ class AiEditorWidget(QWidget):
             self.add_to_history(pixmap, "원본 이미지 로드")
 
     # yhkim1
-    def _show_image_popup(self, image_bytes: bytes, title: str = "Image Popup"):
+    def _show_image_popup(self, image_bytes: bytes, title: str = "Image Popup", save_path: str = None):
         """
         생성된 이미지 확인을 위한 임시 팝업창 함수
         """
@@ -899,7 +1001,8 @@ class AiEditorWidget(QWidget):
             if result == QDialog.Accepted:
                 # 재생성된 이미지를 현재 편집기의 이미지 뷰어에 적용
                 self.image_viewer.set_photo(dialog.pixmap)
-                self.add_to_history(dialog.pixmap, title) # Add to history
+                # save_path가 제공된 경우 파일 경로와 함께 히스토리에 추가
+                self.add_to_history(dialog.pixmap, title, image_path=save_path)
                 return True
             return False
         except Exception as e:
@@ -941,6 +1044,11 @@ class AiEditorWidget(QWidget):
         if not self.original_image_path:
             QMessageBox.warning(self, "이미지 없음", "편집할 이미지를 먼저 로드해주세요.")
             return
+
+        # 버튼 비활성화 및 로딩 표시
+        self.apply_button.setEnabled(False)
+        self.apply_button.setText("생성 중...")
+        QApplication.processEvents()  # UI 업데이트
 
         print("Collecting editor data...")
         edit_data = self.collect_editor_data()
@@ -991,7 +1099,10 @@ class AiEditorWidget(QWidget):
                 user_prompt=edit_data.get('user_prompt', ''),
                 annotation=False
             )
-            self._save_bytes_as_png(generated_image, "./generated_image_temp.png")
+
+            if not generated_image:
+                QMessageBox.warning(self, "오류", "첫 번째 이미지 생성에 실패했습니다.")
+                return
 
             # 기존
             # generated_image_shot = self.vision_editor.regenerate_image_shot(
@@ -1039,27 +1150,60 @@ class AiEditorWidget(QWidget):
                 regen_data=extracted_edit_data
             )
 
+            if not generated_image_shot:
+                QMessageBox.warning(self, "오류", "최종 이미지 생성에 실패했습니다.")
+                return
+
             if generated_image_shot:
                 print("Image regenerated successfully.")
-                # yhkim1 - 이미지 확인용으로 만든 임시 팝업창
-                image_applied = self._show_image_popup(generated_image_shot, "재생성된 이미지")
+
+                # 먼저 파일 경로 생성 (저장은 사용자가 확인을 눌렀을 때만)
+                # 원본 이미지 경로를 기반으로 새 파일명 생성
+                original_dir = os.path.dirname(self.original_image_path)
+                original_name = os.path.splitext(os.path.basename(self.original_image_path))[0]
+                original_ext = os.path.splitext(self.original_image_path)[1]
+
+                # 기존 파일명에서 숫자 접미사와 히스토리 접미사 제거 (예: _changed_1, _history_0 -> _changed)
+                import re
+                base_name = re.sub(r'(_\d+|_history_\d+)$', '', original_name)
+
+                # 같은 디렉토리에서 다음 번호 찾기
+                counter = 1
+                while True:
+                    new_file_path = os.path.join(original_dir, f"{base_name}_{counter}{original_ext}")
+                    if not os.path.exists(new_file_path):
+                        break
+                    counter += 1
+
+                # 팝업으로 이미지 확인 및 저장 경로 전달
+                image_applied = self._show_image_popup(generated_image_shot, "재생성된 이미지", save_path=new_file_path)
+
                 if image_applied:
+                    # 확인을 눌렀을 때만 파일 저장
+                    self._save_bytes_as_png(generated_image_shot, new_file_path)
+                    print(f"이미지 저장됨: {new_file_path}")
                     print("재생성된 이미지가 편집기에 적용되었습니다.")
+
+                    # 현재 작업 중인 이미지 경로 업데이트
+                    self.original_image_path = new_file_path
+
+                    # 입력창 초기화
+                    self.user_prompt_input.clear()
                 else:
                     print("사용자가 이미지 적용을 취소했습니다.")
-                
-                temp_dir = "./temp"
-                if not os.path.exists(temp_dir):
-                    os.makedirs(temp_dir)
-                from datetime import datetime
-                current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-                temp_file_path = f"{temp_dir}/generate_image_{current_time}.png"
-                self._save_bytes_as_png(generated_image_shot, temp_file_path)
             else:
                 print("실패", "이미지 재생성에 실패했습니다. (결과 없음)")
 
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             print(f"An error occurred during regeneration: {e}")
+            print(f"Traceback:\n{error_details}")
+            QMessageBox.critical(self, "오류", f"이미지 재생성 중 오류가 발생했습니다:\n{str(e)}")
+        finally:
+            # 버튼 다시 활성화
+            self.apply_button.setEnabled(True)
+            self.apply_button.setText("적용하기")
 
 
 
@@ -1110,14 +1254,37 @@ class AiEditorWidget(QWidget):
             'item': [path for path in getattr(self.image_grid_widget, 'image_paths', [])]
         }
 
-    def add_to_history(self, pixmap, description=""):
+    def add_to_history(self, pixmap, description="", image_path=None):
         # If we are not at the end of the history (i.e., we did an undo), truncate the future
         if self.history_index < len(self.image_history) - 1:
             self.image_history = self.image_history[:self.history_index + 1]
 
+        # 이미지 파일 경로가 제공되지 않으면 히스토리용 임시 파일로 저장
+        if not image_path:
+            # 원본 이미지 디렉토리에 히스토리 파일 저장
+            if self.original_image_path:
+                original_dir = os.path.dirname(self.original_image_path)
+                original_name = os.path.splitext(os.path.basename(self.original_image_path))[0]
+                original_ext = os.path.splitext(self.original_image_path)[1]
+
+                # 히스토리 인덱스를 파일명에 포함
+                history_num = len(self.image_history)
+                image_path = os.path.join(original_dir, f"{original_name}_history_{history_num}{original_ext}")
+
+                # Pixmap을 파일로 저장
+                pixmap.save(image_path)
+
         # Add new state
-        self.image_history.append({"pixmap": pixmap.copy(), "description": description})
+        self.image_history.append({
+            "pixmap": pixmap.copy(),
+            "description": description,
+            "image_path": image_path
+        })
         self.history_index = len(self.image_history) - 1
+
+        # 현재 작업 중인 이미지 경로 업데이트
+        if image_path:
+            self.original_image_path = image_path
 
         # Update UI
         self.update_history_panel()
@@ -1149,8 +1316,67 @@ class AiEditorWidget(QWidget):
             item = self.image_history[index]
             self.image_viewer.set_photo(item["pixmap"]) # This resets mask history, which is fine
 
+            # 현재 작업 중인 이미지 경로 업데이트
+            if "image_path" in item and item["image_path"]:
+                self.original_image_path = item["image_path"]
+
             self.update_history_panel()
             self.update_history_buttons(False, False)
+
+    def open_final_save_dialog(self):
+        if not self.image_history:
+            QMessageBox.warning(self, "히스토리 없음", "저장할 히스토리가 없습니다.")
+            return
+
+        dialog = FinalSaveDialog(self.image_history, self)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_paths = dialog.get_selected_paths()
+            self.process_final_save(selected_paths)
+
+    def process_final_save(self, selected_paths):
+        if not selected_paths:
+            return
+
+        final_image_paths = []
+        try:
+            # Determine the base name from the very first image in the history
+            if self.image_history:
+                first_image_path = self.image_history[0]["image_path"]
+                original_dir = os.path.dirname(first_image_path)
+                original_name_ext = os.path.basename(first_image_path)
+                original_name, original_ext = os.path.splitext(original_name_ext)
+            else: # Fallback, should not happen if button is clicked
+                QMessageBox.warning(self, "오류", "원본 이미지 정보를 찾을 수 없습니다.")
+                return
+
+            # Save selected files with _final_ suffix
+            for i, path_to_copy in enumerate(selected_paths):
+                final_name = f"{original_name}_final_{i+1}{original_ext}"
+                final_path = os.path.join(original_dir, final_name)
+                
+                # Find the corresponding pixmap and save it
+                for item in self.image_history:
+                    if item["image_path"] == path_to_copy:
+                        item["pixmap"].save(final_path)
+                        final_image_paths.append(final_path)
+                        break
+            
+            # Delete all _history_ files
+            for item in self.image_history:
+                history_path = item["image_path"]
+                if "_history_" in history_path and os.path.exists(history_path):
+                    try:
+                        os.remove(history_path)
+                        print(f"Removed history file: {history_path}")
+                    except OSError as e:
+                        print(f"Error removing file {history_path}: {e}")
+
+            QMessageBox.information(self, "저장 완료", f"{len(final_image_paths)}개의 이미지가 최종 저장되었습니다.")
+            self.finalSaveCompleted.emit(final_image_paths)
+
+        except Exception as e:
+            QMessageBox.critical(self, "저장 오류", f"최종 이미지를 저장하는 중 오류가 발생했습니다: {e}")
+            print(f"Error during final save: {e}")
 
     def update_history_buttons(self, undo_enabled, redo_enabled):
         self.undo_btn.setEnabled(undo_enabled)
@@ -1369,9 +1595,12 @@ class VisionEditor():
         reference_image_paths = []
         try:
             for category, data in regen_data.items():
-                reference_path = data.get("reference")
-                if reference_path and os.path.exists(reference_path):
-                    reference_image_paths.append(reference_path)
+                if category == 'user_prompt':
+                    continue
+                if isinstance(data, dict):
+                    reference_path = data.get("reference")
+                    if reference_path and os.path.exists(reference_path):
+                        reference_image_paths.append(reference_path)
 
             p = self.prompt.CHANGE_ATTRIBUTES.format(instructions=", ".join(instructions))
             image_files = [source_image_path] + reference_image_paths

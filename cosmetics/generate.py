@@ -93,10 +93,10 @@ class ImageGenerator:
         """Combines multiple products into one scene."""
 
         p = prompt.CREATE_BEAUTY_SCENE
-        if not reference_image_paths is None:
+        if reference_image_paths is not None:
             all_image_files = product_image_paths + reference_image_paths
         else:
-            all_image_files = reference_image_paths
+            all_image_files = product_image_paths
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
         output_path = os.path.join(self.output_dir, "beauty_scene.png")

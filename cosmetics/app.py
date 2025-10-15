@@ -76,9 +76,12 @@ class AIGeneratorApp(QMainWindow):
                 background: #f8f9fa;
             }
             QToolTip {
-                color: #000000;
-                background-color: #ffffff;
-                border: 1px solid black;
+                color: black;
+                background: white;
+                background-color: white;
+                border: 1px solid #aaaaaa;
+                padding: 8px;
+                font-size: 12px;
             }
         """)
 
@@ -97,9 +100,10 @@ class AIGeneratorApp(QMainWindow):
 
         self.loading_text_index = 0
         self.loading_texts = [
-            "이미지 분석 및 이미지 구상 중...",
-            "배경 및 소품 렌더링 중...",
-            "최종 결과 조합 중..."
+            "입력 이미지 데이터 분석중...",
+            "레퍼런스 이미지 분석중...",
+            "최종 결과 조합 중...",
+            "조금만 기다려주세요, 거의 완성되었습니다!"
         ]
         self.animation_timer = QTimer(self)
         self.animation_timer.timeout.connect(self.update_loading_animation)
@@ -283,10 +287,6 @@ class AIGeneratorApp(QMainWindow):
             """)
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, m=mode: self.set_generation_mode(m))
-            
-            btn_text = btn.text()
-            if btn_text in self.FEATURE_TOOLTIPS:
-                btn.setToolTip(self.FEATURE_TOOLTIPS[btn_text]["detail"])
 
             options_layout.addWidget(btn, i, j)
 
@@ -514,15 +514,71 @@ class AIGeneratorApp(QMainWindow):
         return page
 
     def create_step5_page(self):
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+
         page = QWidget()
         layout = QVBoxLayout(page)
-        title = QLabel("AI 이미지 생성 - 결과 확인")
+        
+        title = QLabel("Step 4: 최종 결과 확인")
         title.setStyleSheet("font-size: 20px; font-weight: 600; color: #495057;")
         layout.addWidget(title)
-        group = QGroupBox("생성된 이미지 결과")
-        self.grid_layout = QGridLayout(group)
+        
+        group = QGroupBox("저장된 최종 이미지")
+        self.results_grid_layout = QGridLayout(group)
         layout.addWidget(group)
-        return page
+
+        scroll_area.setWidget(page)
+        return scroll_area
+
+    def show_large_image(self, pixmap):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("이미지 크게 보기")
+        layout = QVBoxLayout(dialog)
+        label = QLabel()
+        label.setPixmap(pixmap.scaled(800, 800, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        layout.addWidget(label)
+        dialog.exec_()
+
+    @pyqtSlot(list)
+    def on_final_save_completed(self, final_image_paths):
+        # Clear previous results
+        while self.results_grid_layout.count():
+            child = self.results_grid_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Populate the grid with final images
+        for i, image_path in enumerate(final_image_paths):
+            pixmap = QPixmap(image_path)
+            if pixmap.isNull():
+                continue
+
+            image_container = QFrame()
+            image_container.setFrameShape(QFrame.StyledPanel)
+            container_layout = QVBoxLayout(image_container)
+            
+            image_label = QLabel()
+            image_label.setPixmap(pixmap.scaled(250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            image_label.setAlignment(Qt.AlignCenter)
+            image_label.mousePressEvent = lambda event, p=pixmap: self.show_large_image(p)
+            image_label.setCursor(Qt.PointingHandCursor)
+
+            path_label = QLabel(os.path.basename(image_path))
+            path_label.setAlignment(Qt.AlignCenter)
+            path_label.setWordWrap(True)
+
+            container_layout.addWidget(image_label)
+            container_layout.addWidget(path_label)
+
+            row, col = i // 3, i % 3 # 3 columns grid
+            self.results_grid_layout.addWidget(image_container, row, col)
+
+        # Go to the results page
+        self.stacked_widget.setCurrentIndex(3)
+        self.update_workflow_ui(3)
+
 
     def update_workflow_ui(self, step_index):
         for i, label in enumerate(self.sidebar_labels):
@@ -546,7 +602,7 @@ class AIGeneratorApp(QMainWindow):
             """)
 
         self.prev_button.setEnabled(step_index > 0)
-        self.next_button.setEnabled(step_index < self.stacked_widget.count() - 1)
+        self.next_button.setEnabled(step_index < self.stacked_widget.count() - 1 and step_index != 2)
         
         if step_index == 0:
             self.next_button.setText("생성 →")
@@ -592,18 +648,18 @@ class AIGeneratorApp(QMainWindow):
             # Start generation immediately
             kwargs = {}
             if self.generation_mode == 'change_attributes':
-                kwargs['image_path'] = main_images[0]
+                kwargs['image_paths'] = main_images
                 kwargs['instructions'] = self.instructions_input.toPlainText().strip().split('\n')
             elif self.generation_mode == 'create_thumbnail':
-                kwargs['image_path'] = main_images[0]
+                kwargs['image_paths'] = main_images
                 if hasattr(self, 'reference_group'):
-                    kwargs['reference_image_path'] = self.reference_group.grid_widget.image_paths
+                    kwargs['reference_image_paths'] = self.reference_group.grid_widget.image_paths
             elif self.generation_mode == 'apply_style':
-                kwargs['product_image_path'] = main_images[0]
-                kwargs['reference_image_path'] = self.reference_group.grid_widget.image_paths
+                kwargs['product_image_paths'] = main_images
+                kwargs['reference_image_paths'] = self.reference_group.grid_widget.image_paths
             elif self.generation_mode == 'replace_object':
-                kwargs['product_image_path'] = main_images[0]
-                kwargs['reference_image_path'] = self.reference_group.grid_widget.image_paths
+                kwargs['product_image_paths'] = main_images
+                kwargs['reference_image_paths'] = self.reference_group.grid_widget.image_paths
             elif self.generation_mode == 'create_scene':
                 kwargs['product_image_paths'] = main_images
 
@@ -617,7 +673,7 @@ class AIGeneratorApp(QMainWindow):
 
             self.loading_text_index = 0
             self.update_loading_animation()
-            self.animation_timer.start(1500)
+            self.animation_timer.start(2000)
             self.image_thread.start()
 
         elif current_index == 1:
@@ -625,30 +681,9 @@ class AIGeneratorApp(QMainWindow):
             pass
 
         elif current_index == 2:
-            # 편집 페이지에서 결과 페이지로
-            # 모든 생성된 이미지를 결과 페이지에 표시
-            while self.grid_layout.count():
-                child = self.grid_layout.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
-
-            if hasattr(self, 'all_generated_images') and self.all_generated_images:
-                for i, image_path in enumerate(self.all_generated_images):
-                    pixmap = QPixmap(image_path)
-                    image_container = QWidget()
-                    container_layout = QVBoxLayout(image_container)
-                    image_label = QLabel()
-                    image_label.setPixmap(pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    image_label.setAlignment(Qt.AlignCenter)
-                    number_label = QLabel(f"결과 {i + 1}")
-                    number_label.setAlignment(Qt.AlignCenter)
-                    container_layout.addWidget(image_label)
-                    container_layout.addWidget(number_label)
-                    row, col = i // 3, i % 3
-                    self.grid_layout.addWidget(image_container, row, col)
-            
-            self.stacked_widget.setCurrentIndex(3)
-            self.update_workflow_ui(3)
+            # This is the editor page. The transition is now handled by the finalSaveCompleted signal.
+            # The default next button is disabled, so this part should not be reached.
+            pass
 
         elif current_index == 3:
             # 결과 페이지에서 다시하기
@@ -694,6 +729,7 @@ class AIGeneratorApp(QMainWindow):
             
             # AiEditorWidget 추가
             self.editor_widget = AiEditorWidget(self)
+            self.editor_widget.finalSaveCompleted.connect(self.on_final_save_completed)
             self.stacked_widget.insertWidget(2, self.editor_widget)
         
         # 생성된 이미지를 편집기에 로드
