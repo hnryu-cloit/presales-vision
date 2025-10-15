@@ -1,4 +1,5 @@
 import sys
+import os
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QLabel, QTextEdit, QFormLayout,
@@ -560,7 +561,7 @@ class AIGeneratorApp(QMainWindow):
             container_layout = QVBoxLayout(image_container)
             
             image_label = QLabel()
-            image_label.setPixmap(pixmap.scaled(250, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            image_label.setPixmap(pixmap.scaled(300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             image_label.setAlignment(Qt.AlignCenter)
             image_label.mousePressEvent = lambda event, p=pixmap: self.show_large_image(p)
             image_label.setCursor(Qt.PointingHandCursor)
@@ -602,12 +603,12 @@ class AIGeneratorApp(QMainWindow):
             """)
 
         self.prev_button.setEnabled(step_index > 0)
-        self.next_button.setEnabled(step_index < self.stacked_widget.count() - 1 and step_index != 2)
+        self.next_button.setEnabled(step_index < self.stacked_widget.count() - 1)
         
         if step_index == 0:
             self.next_button.setText("생성 →")
         elif step_index == 2: # Editor page
-            self.next_button.setText("결과 확인 →")
+            self.next_button.setText("최종 저장")
         elif step_index == self.stacked_widget.count() - 1: # Results page
             self.next_button.setText("다시하기")
         else:
@@ -681,9 +682,9 @@ class AIGeneratorApp(QMainWindow):
             pass
 
         elif current_index == 2:
-            # This is the editor page. The transition is now handled by the finalSaveCompleted signal.
-            # The default next button is disabled, so this part should not be reached.
-            pass
+            # The "Next" button is now "Final Save". Trigger the save dialog in the editor.
+            if hasattr(self, 'editor_widget'):
+                self.editor_widget.open_final_save_dialog()
 
         elif current_index == 3:
             # 결과 페이지에서 다시하기

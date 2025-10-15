@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QDialog, QScrollArea, QInputDialog, QGridLayout, QCheckBox
 )
 
-from PyQt5.QtCore import Qt, QPoint, QRectF, pyqtSignal, QThread, QBuffer, QIODevice
+from PyQt5.QtCore import Qt, QPoint, QRectF, pyqtSignal, QThread, QBuffer, QIODevice, QSize
 from PyQt5.QtGui import  QPixmap, QImage, QPainter, QPen, QColor, QKeySequence, QIcon
 
 from common import timefn
@@ -643,29 +643,6 @@ class AiEditorWidget(QWidget):
         # 1. Image Viewer
         image_viewer_group = QGroupBox("이미지 편집")
         image_viewer_layout = QVBoxLayout(image_viewer_group)
-
-        # Layout for title and final save button
-        title_layout = QHBoxLayout()
-        title_label = QLabel("이미지 편집") # Re-add a label for the title
-        title_layout.addWidget(title_label, 1)
-        self.final_save_btn = QPushButton("최종 저장")
-        self.final_save_btn.clicked.connect(self.open_final_save_dialog)
-        self.final_save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745; 
-                color: white; 
-                padding: 5px 10px; 
-                font-weight: bold;
-                border-radius: 5px;
-                border: none;
-            }
-            QPushButton:hover { background-color: #218838; }
-            QPushButton:pressed { background-color: #1e7e34; }
-        """)
-        title_layout.addWidget(self.final_save_btn)
-        image_viewer_layout.addLayout(title_layout)
-
-
         self.image_viewer = PhotoViewer(self)
         self.brush_group.buttonClicked.connect(self.image_viewer.set_draw_mode)
         self.brush_slider.valueChanged.connect(self.image_viewer.set_brush_size)
@@ -736,8 +713,12 @@ class AiEditorWidget(QWidget):
 
         self.apply_button = QPushButton("적용하기")
         self.apply_button.setMinimumHeight(40)
-        self.apply_button.setMinimumWidth(100)
-        self.apply_button.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "resource/icon/ai-editor.png")))
+        self.apply_button.setMinimumWidth(140) # Increased width
+        # Check if icon exists before setting
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resource/icon/ai-edit.png")
+        if os.path.exists(icon_path):
+            self.apply_button.setIcon(QIcon(icon_path))
+            self.apply_button.setIconSize(QSize(24, 24)) # Set icon size
 
         self.apply_button.setStyleSheet("""
             QPushButton {
