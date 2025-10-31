@@ -147,29 +147,29 @@ if __name__ == '__main__':
     refer_dir = './resource/레퍼런스'
     generator = ImageGenerator(output_dir=output_dir)
 
-    # 1. Change Attributes
-    generator.change_attributes(
-        image_path=f'{input_dir}/의자1.jpg',
-        instructions=['검정색 의자를 흰색 으로 변경하고, 화면의 우측 컷으로 교체 해주세요.']
-    )
-
-    ## 2. Create Thumbnail with Metadata
-    generator.create_thumbnail_with_metadata(
-        image_path=f'{input_dir}/서랍장4.jpg',
-        metadata_path=f'{meta_dir}/서랍장4.json',
-    )
-
-    ## 3. Apply Style
-    generator.apply_style_from_reference(
-        product_image_path=f'{input_dir}/소파1.png',
-        reference_image_path=[f'{refer_dir}/001.png']
-    )
-
-    ## 4. Replace Object
-    generator.replace_object_in_reference(
-        product_image_path=f'{input_dir}/의자2.jpg',
-        reference_image_path=[f'{refer_dir}/002.png']
-    )
+    # # 1. Change Attributes
+    # generator.change_attributes(
+    #     image_path=f'{input_dir}/의자1.jpg',
+    #     instructions=['검정색 의자를 흰색 으로 변경하고, 화면의 우측 컷으로 교체 해주세요.']
+    # )
+    #
+    # ## 2. Create Thumbnail with Metadata
+    # generator.create_thumbnail_with_metadata(
+    #     image_path=f'{input_dir}/서랍장4.jpg',
+    #     metadata_path=f'{meta_dir}/서랍장4.json',
+    # )
+    #
+    # ## 3. Apply Style
+    # generator.apply_style_from_reference(
+    #     product_image_path=f'{input_dir}/소파1.png',
+    #     reference_image_path=[f'{refer_dir}/001.png']
+    # )
+    #
+    # ## 4. Replace Object
+    # generator.replace_object_in_reference(
+    #     product_image_path=f'{input_dir}/의자2.jpg',
+    #     reference_image_path=[f'{refer_dir}/002.png']
+    # )
 
     ##5. Create Interior Scene
     generator.create_interior_scene(
@@ -177,5 +177,6 @@ if __name__ == '__main__':
             f'{input_dir}/소파1.png',
             f'{input_dir}/테이블1.jpg',
             f'{input_dir}/의자1.jpg'
+            f'{input_dir}/책장3.jpg'
         ]
     )

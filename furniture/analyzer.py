@@ -23,11 +23,13 @@ class VisionAnalyzer:
         ]
         self.all_columns = set(self.base_columns)
 
-    def analyze(self):
-        image_paths = self._get_image_paths()
+    def analyze(self, image_paths=None, show_ui=True):
+        if image_paths is None:
+            image_paths = self._get_image_paths()
+        
         if not image_paths:
             print(f"No images found in {self.input_dir}")
-            return
+            return []
 
         results = []
         for image_path in image_paths:
@@ -114,12 +116,13 @@ class VisionAnalyzer:
 
                 results.append(result)
 
-                # Show popup for each result and save
-                self.show_single_result_popup(result)
+                if show_ui:
+                    self.show_single_result_popup(result)
                 self._save_result_json(result)
 
             except Exception as e:
                 print(f"Error analyzing {image_path}: {e}")
+        return results
 
     def show_single_result_popup(self, result):
         root = tk.Tk()
