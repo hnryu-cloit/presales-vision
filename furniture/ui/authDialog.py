@@ -6,19 +6,18 @@ import sqlite3
 import hashlib
 import json
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                             QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
-                             QInputDialog)
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
+    QInputDialog
+)
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QFont
 
-
 def get_output_summary(project_path):
-    """특정 프로젝트 경로에 대한 각 기능별 산출물 개수를 계산합니다."""
     functions_to_check = {
-        'scenes': '공간',
-        'furnitures': '가구',
-        'generated_images': '결과물',
+        'generated_images': '생성 이미지',
+        'meta': '메타데이터'
     }
     output_counts = {}
     for func_code in functions_to_check.keys():
@@ -26,7 +25,6 @@ def get_output_summary(project_path):
         count = 0
         if os.path.isdir(func_dir):
             try:
-                # '.DS_Store'와 같은 숨김 파일을 제외하고 집계
                 items = [item for item in os.listdir(func_dir) if not item.startswith('.')]
                 count = len(items)
             except OSError:
@@ -57,8 +55,8 @@ class LoginWidget(QWidget):
                         border-radius: 13px; 
                         padding: 32px; 
                     }""")
-        login_container.setFixedWidth(320)  # 400 * 0.8 = 320
-        login_container.setFixedHeight(304)  # 380 * 0.8 = 304
+        login_container.setFixedWidth(352)
+        login_container.setFixedHeight(334)
 
         container_layout = QVBoxLayout(login_container)
         container_layout.setSpacing(16)  # 20 * 0.8 = 16
@@ -122,7 +120,7 @@ class LoginWidget(QWidget):
 
         self.login_btn = QPushButton('로그인')
         self.login_btn.clicked.connect(self.handle_login)
-        self.login_btn.setMinimumHeight(44)  # 55 * 0.8 = 44
+        self.login_btn.setMinimumHeight(48)
         self.login_btn.setStyleSheet("""
             QPushButton { 
                 background-color: #4285f4; 
@@ -144,7 +142,7 @@ class LoginWidget(QWidget):
 
         self.register_btn = QPushButton('회원가입')
         self.register_btn.clicked.connect(self.show_register_dialog)
-        self.register_btn.setMinimumHeight(44)  # 55 * 0.8 = 44
+        self.register_btn.setMinimumHeight(48)
         self.register_btn.setStyleSheet("""
             QPushButton { 
                 background-color: transparent;
@@ -270,8 +268,7 @@ class RegisterDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #616161;
-            }
-        """)
+            }""")
         button_layout.addWidget(cancel_button)
 
         signup_button = QPushButton('회원가입')
@@ -287,8 +284,7 @@ class RegisterDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #3367d6;
-            }
-        """)
+            }""")
         button_layout.addWidget(signup_button)
 
         layout.addLayout(button_layout)
@@ -306,8 +302,7 @@ class RegisterDialog(QDialog):
             QLineEdit:focus {
                 border-color: #4285f4;
                 background-color: white;
-            }
-        """)
+            }""")
 
     def handle_signup(self):
         # 입력 검증
@@ -346,7 +341,6 @@ class UserManager(QObject):
     login_success = pyqtSignal(dict)  # 사용자 정보 전달
 
     def __init__(self):
-        super().__init__()
         from furniture.admin.path_manager import path_manager
         self.db_path = os.path.join(path_manager.get_app_data_dir(), 'users.db')
         self.current_user = None
@@ -536,15 +530,15 @@ class ProjectItemWidget(QWidget):
         # 두 번째 줄: 산출물 현황 (한 줄)
         summary_data = self.project_data.get('output_summary', {})
         display_names = {
-            'scenes': '공간',
-            'furnitures': '가구',
-            'generated_images': '결과물'
+            'generated_images': '생성 이미지',
+            'meta': '메타데이터'
         }
         
         summary_parts = []
         for code, name in display_names.items():
             count = summary_data.get(code, 0)
-            summary_parts.append(f"{name}: {count}개")
+            if count > 0:
+                summary_parts.append(f"{name}: {count}개")
         
         summary_text = ' | '.join(summary_parts)
         summary_label = QLabel(summary_text)
@@ -745,8 +739,7 @@ class ProjectSelectionDialog(QDialog):
             QListWidget::item:selected {
                 background-color: #e3f2fd;
                 color: black;
-            }
-        """)
+            }""")
         layout.addWidget(self.project_list)
 
         # 버튼들
@@ -765,8 +758,7 @@ class ProjectSelectionDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #45a049;
-            }
-        """)
+            }""")
         button_layout.addWidget(new_project_button)
 
         self.delete_button = QPushButton('삭제')
@@ -787,8 +779,7 @@ class ProjectSelectionDialog(QDialog):
             QPushButton:disabled {
                 background-color: #e0e0e0;
                 color: #9e9e9e;
-            }
-        """)
+            }""")
         button_layout.addWidget(self.delete_button)
 
         button_layout.addStretch()
@@ -806,8 +797,7 @@ class ProjectSelectionDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #1976D2;
-            }
-        """)
+            }""")
         button_layout.addWidget(select_button)
 
         cancel_button = QPushButton('취소')
@@ -823,8 +813,7 @@ class ProjectSelectionDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #616161;
-            }
-        """)
+            }""")
         button_layout.addWidget(cancel_button)
 
         layout.addLayout(button_layout)

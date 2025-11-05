@@ -103,11 +103,9 @@ class PathManager:
 
         # 기본 프로젝트 구조 생성
         base_dirs = [
-            'scenes',           # 공간 이미지
-            'furnitures',       # 가구 이미지
             'generated_images', # 생성된 이미지
             'history',          # 작업 이력
-            'meta'              # 메타데이터
+            'meta'              # 메타 데이터
         ]
 
         for dir_path in base_dirs:
@@ -121,11 +119,7 @@ class PathManager:
         os.makedirs(dir_path, exist_ok=True)
         return dir_path
         
-    def get_scenes_dir(self) -> Optional[str]:
-        return self.get_project_subdir('scenes')
 
-    def get_furnitures_dir(self) -> Optional[str]:
-        return self.get_project_subdir('furnitures')
 
     def get_generated_images_dir(self) -> Optional[str]:
         return self.get_project_subdir('generated_images')

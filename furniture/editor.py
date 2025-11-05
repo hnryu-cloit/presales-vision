@@ -59,7 +59,7 @@ class ImagePopup(QDialog):
 class FinalSaveDialog(QDialog):
     def __init__(self, history, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("최종 저장할 이미지 선택")
+        self.setWindowTitle("최종 이미지 선택")
         self.setModal(True)
         self.setMinimumSize(600, 400)
 
@@ -404,6 +404,7 @@ class HistoryThumbnail(QFrame):
 
         # Description
         desc_label = QLabel(f"<b>Step {index + 1}</b><br>{description}")
+        desc_label.setStyleSheet("font-size: 13px;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label, 1)
 
@@ -469,14 +470,9 @@ class AiEditorWidget(QWidget):
                 for y in range(mask_image.height()):
                     for x in range(mask_image.width()):
                         pixel_color = QColor(mask_image.pixel(x, y))
-                        if pixel_color.red() > 128: # If white
-                            if self.mask_keep_radio.isChecked():
-                                painter.setPen(self.image_viewer.drawing_color)
-                                painter.drawPoint(x, y)
-                        else: # if black
-                            if self.mask_change_radio.isChecked():
-                                painter.setPen(self.image_viewer.drawing_color)
-                                painter.drawPoint(x, y)
+                        if pixel_color.red() <= 128: # If black
+                            painter.setPen(self.image_viewer.drawing_color)
+                            painter.drawPoint(x, y)
                 painter.end()
 
                 # Combine with existing mask
@@ -516,6 +512,7 @@ class AiEditorWidget(QWidget):
 
         # 1. Tools Panel
         tools_panel = QGroupBox("도구")
+        tools_panel.setStyleSheet("QGroupBox { font-weight: bold; } QGroupBox::title { font-size: 25px; }")
         tools_layout = QVBoxLayout(tools_panel)
 
         # Brush/Eraser buttons
@@ -554,8 +551,9 @@ class AiEditorWidget(QWidget):
         tools_layout.addWidget(self.upscale_btn)
         self.upscale_btn.clicked.connect(self.upscale_image)
 
-
-
+        self.segment_button = QPushButton("배경 제거")
+        self.segment_button.clicked.connect(self.segment_foreground)
+        tools_layout.addWidget(self.segment_button)
 
         # Undo/Redo buttons (moved inside tools_layout)
         undo_redo_layout = QHBoxLayout()
@@ -587,39 +585,12 @@ class AiEditorWidget(QWidget):
         undo_redo_layout.addWidget(self.redo_btn)
         tools_layout.addLayout(undo_redo_layout) # <--- ADDED HERE
 
-        # 2. AI Editing Options Panel
-        ai_options_panel = QGroupBox("AI 편집 옵션")
-        ai_options_layout = QVBoxLayout(ai_options_panel)
-
-        # 2.1 Subject Type
-        # 피사체 유형 섹션 제거
-
-        # 2.2 Segmentation & Masking
-        seg_group = QGroupBox("영역 선택 및 마스크")
-        seg_layout = QVBoxLayout(seg_group)
-
-        self.segment_button = QPushButton("전경/배경 분리")
-        self.segment_button.clicked.connect(self.segment_foreground)
-        seg_layout.addWidget(self.segment_button)
-        self.mask_keep_radio = QRadioButton("선택 영역 유지")
-        self.mask_change_radio = QRadioButton("선택 영역 변경")
-        self.mask_change_radio.setChecked(True)
-
-        seg_layout.addWidget(self.mask_keep_radio)
-        seg_layout.addWidget(self.mask_change_radio)
-        ai_options_layout.addWidget(seg_group)
-
-        # 2.2 Detailed Controls
-        # 상세 옵션 UI가 제거되었습니다.
-        
-        # Add stretch to align bottom with reference image layout
-        ai_options_layout.addStretch()
-
         # Add panels to left container
         left_main_layout.addWidget(tools_panel)
 
         # History Panel
         history_panel = QGroupBox("히스토리")
+        history_panel.setStyleSheet("QGroupBox { font-weight: bold; } QGroupBox::title { font-size: 25px; }")
         history_panel_layout = QVBoxLayout(history_panel)
         self.history_scroll_area = QScrollArea()
         self.history_scroll_area.setWidgetResizable(True)
@@ -633,7 +604,9 @@ class AiEditorWidget(QWidget):
         self.history_scroll_area.setWidget(self.history_widget)
         history_panel_layout.addWidget(self.history_scroll_area)
         left_main_layout.addWidget(history_panel)
-        left_main_layout.addWidget(ai_options_panel)
+
+
+        left_main_layout.addStretch()
 
         # --- Center/Right Panel ---
         center_container = QWidget()
@@ -642,6 +615,7 @@ class AiEditorWidget(QWidget):
 
         # 1. Image Viewer
         image_viewer_group = QGroupBox("이미지 편집")
+        image_viewer_group.setStyleSheet("QGroupBox { font-weight: bold; } QGroupBox::title { font-size: 25px; }")
         image_viewer_layout = QVBoxLayout(image_viewer_group)
         self.image_viewer = PhotoViewer(self)
         self.brush_group.buttonClicked.connect(self.image_viewer.set_draw_mode)
@@ -664,6 +638,7 @@ class AiEditorWidget(QWidget):
         # 2. Reference Image
         max_images = 5
         ref_image_group = QGroupBox(f"레퍼런스 이미지(최대 {max_images}개)")
+        ref_image_group.setStyleSheet("QGroupBox { font-weight: bold; } QGroupBox::title { font-size: 25px; }")
         ref_image_main_layout = QVBoxLayout(ref_image_group)
         
         # Scroll Area for the image grid
@@ -689,7 +664,6 @@ class AiEditorWidget(QWidget):
         
         # Add stretch to align bottom with left panel
         ref_image_main_layout.addStretch()
-
         center_layout.addWidget(ref_image_group)
 
         # Set height ratio but allow ref_image_group to expand naturally
@@ -707,7 +681,7 @@ class AiEditorWidget(QWidget):
         bottom_layout.setSpacing(10)
 
         self.user_prompt_input = QLineEdit()
-        self.user_prompt_input.setPlaceholderText("사용자 프롬프트를 입력하세요...")
+        self.user_prompt_input.setPlaceholderText("  🛡️ 프롬프트를 입력하세요...")
         self.user_prompt_input.setMinimumHeight(40)
         bottom_layout.addWidget(self.user_prompt_input, 1)
 

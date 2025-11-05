@@ -11,11 +11,6 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QThread
 from PyQt5.QtGui import QFont, QIcon
 
-# 이 클래스는 authDialog.py에 정의된 UserManager와 호환되도록 설계되었습니다.
-# HistoryManager를 생성할 때 UserManager 인스턴스를 주입해야 합니다.
-# 예: user_manager = UserManager()
-#      history_manager = HistoryManager(user_manager)
-
 class HistoryManager(QObject):
     """히스토리 데이터 관리 클래스"""
 
@@ -262,7 +257,7 @@ class HistoryManager(QObject):
         }
         
         # 기능별 history 디렉토리에 저장
-        history_dir = self.path_manager.get_project_history_dir(action_type)
+        history_dir = self.path_manager.get_history_dir()
         if not history_dir:
             return None
             
@@ -286,10 +281,7 @@ class HistoryManager(QObject):
     
     def load_latest_history_json(self, function_name):
         """특정 기능의 최신 히스토리 JSON 로드"""
-        if not self.path_manager:
-            return None
-            
-        history_dir = self.path_manager.get_project_history_dir(function_name)
+        history_dir = self.path_manager.get_history_dir()
         if not history_dir:
             return None
             
@@ -309,7 +301,7 @@ class HistoryManager(QObject):
         if not self.path_manager:
             return []
             
-        history_dir = self.path_manager.get_project_history_dir(function_name)
+        history_dir = self.path_manager.get_history_dir()
         if not history_dir or not os.path.exists(history_dir):
             return []
             
@@ -339,94 +331,6 @@ class HistoryManager(QObject):
             return history_stack
         except Exception as e:
             print(f"히스토리 스택 로드 실패: {e}")
-            return []
-    
-    def add_metadata_history(self, metadata_type, metadata_id, action, changes=None, status='success'):
-        """메타데이터 변경 이력을 저장합니다."""
-        if not self.path_manager:
-            return None
-            
-        timestamp = datetime.now()
-        step_id = int(timestamp.timestamp() * 1000)
-        
-        # 메타데이터 히스토리 데이터 구성
-        metadata_history = {
-            "step": step_id,
-            "timestamp": timestamp.isoformat(),
-            "metadata_type": metadata_type,
-            "metadata_id": metadata_id,
-            "action": action,
-            "changes": changes or {},
-            "status": status,
-            "user_id": self.path_manager.get_user_id() if hasattr(self.path_manager, 'get_user_id') else None,
-            "project_id": self.path_manager.get_current_project_root()
-        }
-        
-        # 메타데이터 히스토리 디렉토리에 저장
-        history_dir = self.path_manager.get_metadata_history_dir()
-        if not history_dir:
-            return None
-            
-        # 파일명: {step}_{metadata_type}_{metadata_id}.json
-        filename = f"{step_id}_{metadata_type}_{metadata_id}.json"
-        file_path = os.path.join(history_dir, filename)
-        
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(metadata_history, f, ensure_ascii=False, indent=2)
-                
-            # 일반 히스토리에도 기록
-            description = f"메타데이터 {action}: {metadata_type} [{metadata_id}]"
-            self.add_entry('metadata', description, status, metadata_history)
-                
-            return file_path
-        except Exception as e:
-            print(f"메타데이터 히스토리 저장 실패: {e}")
-            return None
-    
-    def get_metadata_history(self, metadata_type=None, metadata_id=None, limit=50):
-        """메타데이터 히스토리를 조회합니다."""
-        if not self.path_manager:
-            return []
-            
-        history_dir = self.path_manager.get_metadata_history_dir()
-        if not history_dir or not os.path.exists(history_dir):
-            return []
-            
-        try:
-            # JSON 파일들을 필터링하고 시간순으로 정렬
-            json_files = []
-            for filename in os.listdir(history_dir):
-                if not filename.endswith('.json'):
-                    continue
-                    
-                # 파일명 필터링 (metadata_type, metadata_id 기준)
-                if metadata_type and metadata_type not in filename:
-                    continue
-                if metadata_id and metadata_id not in filename:
-                    continue
-                    
-                file_path = os.path.join(history_dir, filename)
-                mtime = os.path.getmtime(file_path)
-                json_files.append((mtime, file_path))
-                
-            # 최신순으로 정렬하고 limit 적용
-            json_files.sort(reverse=True)
-            json_files = json_files[:limit]
-            
-            # 파일 내용 로드
-            history_list = []
-            for mtime, file_path in json_files:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        history_list.append(data)
-                except:
-                    continue
-                    
-            return history_list
-        except Exception as e:
-            print(f"메타데이터 히스토리 조회 실패: {e}")
             return []
 
 
@@ -773,12 +677,6 @@ def add_history_entry(history_manager, action_description: str, status: str = 'i
         action_type = 'login'
     elif '프로젝트' in action_description:
         action_type = 'project'
-    elif '공간' in action_description or '분석' in action_description:
-        action_type = 'space_analysis'
-    elif '가구' in action_description and '배치' in action_description:
-        action_type = 'furniture_placement'
-    elif '가구' in action_description and '추천' in action_description:
-        action_type = 'furniture_recommendation'
     elif '저장' in action_description:
         action_type = 'save'
     elif '내보내기' in action_description:

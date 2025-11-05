@@ -4,10 +4,6 @@ import json
 
 from common import config, prompt, gemini
 
-import tkinter as tk
-from tkinter import ttk
-from PIL import Image, ImageTk
-
 
 class VisionAnalyzer:
     def __init__(self, input_dir, output_dir):
@@ -115,138 +111,11 @@ class VisionAnalyzer:
                         self.all_columns.add(field_name)
 
                 results.append(result)
-
-                if show_ui:
-                    self.show_single_result_popup(result)
-                self._save_result_json(result)
+                self.save_result_json(result)
 
             except Exception as e:
                 print(f"Error analyzing {image_path}: {e}")
         return results
-
-    def show_single_result_popup(self, result):
-        root = tk.Tk()
-        root.title(f"Analysis Result - {result['filename']}")
-        root.geometry("1000x900")
-        root.resizable(True, True)
-
-        main_frame = ttk.Frame(root, padding="15")
-        main_frame.pack(fill='both', expand=True)
-
-        # Image frame - centered at top
-        image_frame = ttk.Frame(main_frame)
-        image_frame.pack(fill='x', pady=(0, 20))
-
-        img = Image.open(result['image_path'])
-        img.thumbnail((300, 300))
-        photo = ImageTk.PhotoImage(img)
-        img_label = ttk.Label(image_frame, image=photo)
-        img_label.image = photo
-        img_label.pack()
-
-        # Table frame
-        table_frame = ttk.LabelFrame(main_frame, text="Analysis Results", padding="10")
-        table_frame.pack(fill='both', expand=True)
-
-        # Create treeview with proper columns
-        columns = ('Value', 'Reason')
-        tree = ttk.Treeview(table_frame, columns=columns, show='tree headings', height=12)
-
-        # Configure columns
-        tree.heading('#0', text='Field', anchor='w')
-        tree.heading('Value', text='Value', anchor='w')
-        tree.heading('Reason', text='Reason', anchor='w')
-
-        tree.column('#0', width=120, minwidth=80, anchor='w')
-        tree.column('Value', width=150, minwidth=100, anchor='w')
-        tree.column('Reason', width=600, minwidth=400, anchor='w')
-
-        # Parse JSON data
-        try:
-            attributes = json.loads(result.get('attributes', '{}'))
-            description = json.loads(result.get('description', '{}'))
-        except:
-            attributes = {}
-            description = {}
-
-        # Get category-specific attributes from config
-        category = result.get('category', '')
-        category_attributes = config.PRODUCT_ATTRIBUTE.get(category, {})
-
-        # Prepare basic data rows
-        rows_data = [
-            ('filename', result.get('filename', ''), '-'),
-            ('category', result.get('category', ''), '-'),
-            ('sub_category', result.get('sub_category', ''), '-'),
-        ]
-
-        # 카테고리별 속성 추가 (순서 보장)
-        for attr_key in category_attributes.keys():
-            value, reason = self._extract_attribute_value_reason(attributes, attr_key)
-            if value and value.strip():
-                rows_data.append((attr_key, value, reason))
-
-        # 공통 속성 추가
-        common_attrs = ['스타일', '색상', '무늬', '타겟 고객', '타겟 연령층']
-        for attr_key in common_attrs:
-            if attr_key not in category_attributes:  # 중복 방지
-                value, reason = self._extract_attribute_value_reason(attributes, attr_key)
-                if value and value.strip():
-                    rows_data.append((attr_key, value, reason))
-
-        # 기타 추가 속성들 (분석에서 나온 다른 속성들)
-        processed_keys = set([row[0] for row in rows_data])
-        for attr_key, attr_data in attributes.items():
-            if attr_key not in processed_keys:
-                value, reason = self._parse_attribute_data(attr_data, attr_key)
-                if value and value.strip():
-                    rows_data.append((attr_key, value, reason))
-
-        # Insert data into treeview
-        for i, (field, value, reason) in enumerate(rows_data):
-            if value and value.strip():
-                item_id = tree.insert("", "end", text=field, values=(str(value), str(reason)))
-                # Alternate row colors
-                if i % 2 == 1:
-                    tree.item(item_id, tags=('oddrow',))
-
-        # Configure alternating row colors
-        tree.tag_configure('oddrow', background='#f5f5f5')
-
-        # Scrollbars
-        v_scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
-        h_scrollbar = ttk.Scrollbar(table_frame, orient="horizontal", command=tree.xview)
-        tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-
-        # Grid layout for table and scrollbars
-        tree.grid(row=0, column=0, sticky='nsew')
-        v_scrollbar.grid(row=0, column=1, sticky='ns')
-        h_scrollbar.grid(row=1, column=0, sticky='ew')
-
-        table_frame.grid_rowconfigure(0, weight=1)
-        table_frame.grid_columnconfigure(0, weight=1)
-        table_frame.grid_rowconfigure(1, weight=0)
-
-        # Add description section below the table
-        desc_frame = ttk.LabelFrame(main_frame, text="Description", padding="10")
-        desc_frame.pack(fill='x', pady=(10, 0))
-
-        desc_text = tk.Text(desc_frame, wrap='word', height=6, font=('TkDefaultFont', 10), padx=10, pady=10)
-        desc_scrollbar = ttk.Scrollbar(desc_frame, orient="vertical", command=desc_text.yview)
-        desc_text.configure(yscrollcommand=desc_scrollbar.set)
-
-        description_content = description.get('description', '')
-        if description_content:
-            desc_text.insert('1.0', description_content)
-        else:
-            desc_text.insert('1.0', "설명 정보 없음")
-
-        desc_text.config(state='disabled')
-
-        desc_text.pack(side='left', fill='both', expand=True)
-        desc_scrollbar.pack(side='right', fill='y')
-
-        root.mainloop()
 
     def _extract_attribute_value_reason(self, attributes, attr_key):
         """주어진 속성 키에 대한 값과 이유를 추출"""
@@ -328,7 +197,7 @@ class VisionAnalyzer:
 
         return value.strip(), reason.strip()
 
-    def _save_result_json(self, result):
+    def save_result_json(self, result):
         filename = result['filename']
         name, ext = os.path.splitext(filename)
 

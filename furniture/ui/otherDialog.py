@@ -15,15 +15,17 @@ class SettingWidget(QWidget):
         self.load_user_data()
         
     def init_ui(self):
-        layout = QVBoxLayout()
+        setting_content_layout = QVBoxLayout()
+        setting_content_layout.setContentsMargins(30, 30, 30, 30)
         
         title = QLabel('Setting')
         title.setFont(QFont("Noto Sans KR", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #2E86AB; margin: 10px; padding: 10px;")
-        layout.addWidget(title)
+        title.setStyleSheet("color: #2E86AB; margin: 10px; padding: 10px; font-size: 16px; font-family: 'Noto Sans KR';")
+        setting_content_layout.addWidget(title)
         
         account_group = QGroupBox("계정 정보")
+        account_group.setStyleSheet("font-size: 14px; font-weight: bold;")
         account_layout = QGridLayout()
         
         account_layout.addWidget(QLabel('이름:'), 0, 0)
@@ -58,9 +60,10 @@ class SettingWidget(QWidget):
         account_layout.addLayout(logout_layout, 2, 1)
         
         account_group.setLayout(account_layout)
-        layout.addWidget(account_group)
+        setting_content_layout.addWidget(account_group)
         
         project_group = QGroupBox("프로젝트 설정")
+        project_group.setStyleSheet("font-size: 14px; font-weight: bold;")
         project_layout = QGridLayout()
         
         project_layout.addWidget(QLabel('프로젝트명:'), 0, 0)
@@ -95,10 +98,22 @@ class SettingWidget(QWidget):
         project_layout.addLayout(change_layout, 1, 1)
         
         project_group.setLayout(project_layout)
-        layout.addWidget(project_group)
+        setting_content_layout.addWidget(project_group)
         
-        layout.addStretch()
-        self.setLayout(layout)
+        setting_content_layout.addStretch()
+
+        main_layout = QVBoxLayout()
+        main_layout.addStretch()
+
+        center_layout = QHBoxLayout()
+        center_layout.addStretch()
+        center_layout.addLayout(setting_content_layout)
+        center_layout.addStretch()
+
+        main_layout.addLayout(center_layout)
+        main_layout.addStretch()
+
+        self.setLayout(main_layout)
     
     def handle_logout(self):
         """로그아웃 처리"""

@@ -1,9 +1,6 @@
 import os
 from datetime import datetime
-
 import json
-import tkinter as tk
-from PIL import Image, ImageTk
 
 from common import prompt
 from common.gemini import Gemini
@@ -15,17 +12,18 @@ class ImageGenerator:
         self.gemini = Gemini()
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def change_attributes(self, image_path, instructions):
+    def change_attributes(self, image_path, instructions, show_ui=True):
         """Changes the color or orientation of a furniture image."""
         p = prompt.CHANGE_ATTRIBUTES.format(instructions=", ".join(instructions))
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=[image_path])
 
         output_path = self._get_output_path(image_path, "_changed")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        self.show_image_popup(product_image_path=image_path, save_image_path=saved_files)
+        if show_ui:
+            self.show_image_popup(product_image_path=image_path, save_image_path=saved_files)
         return saved_files
 
-    def create_thumbnail_with_metadata(self, image_path, metadata_path):
+    def create_thumbnail_with_metadata(self, image_path, metadata_path, show_ui=True):
         """Generates a thumbnail with text overlay or a scene based on the description."""
         with open(metadata_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
@@ -40,34 +38,37 @@ class ImageGenerator:
 
         output_path = self._get_output_path(image_path, "_thumbnail_meta")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        self.show_image_popup(product_image_path=image_path, save_image_path=saved_files)
+        if show_ui:
+            self.show_image_popup(product_image_path=image_path, save_image_path=saved_files)
         return saved_files
 
-    def apply_style_from_reference(self, product_image_path, reference_image_path):
+    def apply_style_from_reference(self, product_image_path, reference_image_paths, show_ui=True):
         """Uses a reference image for style transfer."""
         p = prompt.APPLY_STYLE_FROM_REFERENCE
 
-        all_image_files = [product_image_path] + reference_image_path
+        all_image_files = [product_image_path] + reference_image_paths
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
         output_path = self._get_output_path(product_image_path, "_styled")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        self.show_image_popup(product_image_path=product_image_path, reference_image_path=reference_image_path, save_image_path=saved_files)
+        if show_ui:
+            self.show_image_popup(product_image_path=product_image_path, reference_image_path=reference_image_paths, save_image_path=saved_files)
         return saved_files
 
-    def replace_object_in_reference(self, product_image_path, reference_image_path):
+    def replace_object_in_reference(self, product_image_path, reference_image_paths, show_ui=True):
         """Inpaints the product into a reference scene."""
         p = prompt.REPLACE_OBJECT_IN_REFERENCE.format(object_to_replace=product_image_path)
 
-        all_image_files = [product_image_path] + reference_image_path
+        all_image_files = [product_image_path] + reference_image_paths
         generated_image_data, _ = self.gemini.call_image_generator(prompt=p, image_files=all_image_files)
 
         output_path = self._get_output_path(product_image_path, "_replaced")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        self.show_image_popup(product_image_path=product_image_path, reference_image_path=reference_image_path, save_image_path=saved_files)
+        if show_ui:
+            self.show_image_popup(product_image_path=product_image_path, reference_image_path=reference_image_paths, save_image_path=saved_files)
         return saved_files
 
-    def create_interior_scene(self, product_image_paths):
+    def create_interior_scene(self, product_image_paths, show_ui=True):
         """Combines multiple products into one scene."""
 
         p = prompt.CREATE_INTERIOR_SCENE
@@ -75,7 +76,8 @@ class ImageGenerator:
 
         output_path = os.path.join(self.output_dir, "interior_scene.png")
         saved_files = self._save_image_from_data(generated_image_data, output_path)
-        self.show_image_popup(product_image_path=product_image_paths, save_image_path=saved_files)
+        if show_ui:
+            self.show_image_popup(product_image_path=product_image_paths, save_image_path=saved_files)
         return saved_files
 
     def _get_output_path(self, original_path, suffix):
@@ -93,49 +95,7 @@ class ImageGenerator:
 
         return saved_files
 
-    def show_image_popup(self, product_image_path=None, reference_image_path=None, save_image_path=None):
-        image_paths = []
-        if product_image_path:
-            if isinstance(product_image_path, list):
-                image_paths.extend(product_image_path)
-            else:
-                image_paths.append(product_image_path)
 
-        if reference_image_path:
-            if isinstance(reference_image_path, list):
-                image_paths.extend(reference_image_path)
-            else:
-                image_paths.append(reference_image_path)
-
-        if save_image_path:
-            if isinstance(save_image_path, list):
-                image_paths.extend(save_image_path)
-            else:
-                image_paths.append(save_image_path)
-
-        root = tk.Tk()
-        root.title("Generated Images")
-
-        if not image_paths:
-            print("No images to display.")
-            root.destroy()
-            return
-
-        for image_path in image_paths:
-            if not os.path.exists(image_path):
-                print(f"Image not found at {image_path}, skipping.")
-                continue
-            img = Image.open(image_path)
-            img.thumbnail((800, 600))
-            photo = ImageTk.PhotoImage(img)
-            label = tk.Label(root, image=photo)
-            label.image = photo
-            label.pack(side=tk.LEFT)
-
-        if root.children:
-            root.mainloop()
-        else:
-            root.destroy()
 
 if __name__ == '__main__':
 

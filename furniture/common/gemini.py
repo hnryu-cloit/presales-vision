@@ -172,7 +172,7 @@ class Gemini:
                 mime_type, _ = mimetypes.guess_type(image_file)
                 if not mime_type:
                     mime_type = 'application/octet-stream'  # 기본값 설정
-                parts.append(types.Part.from_bytes(data=image_data, mime_type=ss))
+                parts.append(types.Part.from_bytes(data=image_data, mime_type=mime_type))
             except Exception as e:
                 print(f"이미지 파일 로딩 중 오류 발생: {e}")
                 return [], ""
