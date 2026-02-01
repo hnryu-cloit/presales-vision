@@ -751,7 +751,7 @@ class AIGeneratorApp(QMainWindow):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    font = QFont("Noto Sans KR", 10)
+    font = QFont("Noto Sans KR", 11)
     app.setFont(font)
     app.setStyle('Fusion')
     ex = AIGeneratorApp()

@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 
-
 from common import prompt
 from common.gemini import Gemini
 

@@ -1,11 +1,4 @@
 import os
-from io import BytesIO
-import base64
-import io
-
-from PIL import Image
-import vertexai
-from vertexai.vision_models import Image as VertexImage, ImageGenerationModel
 
 from common.gemini import Gemini
 from common import prompt
