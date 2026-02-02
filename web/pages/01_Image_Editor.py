@@ -16,7 +16,7 @@ Features:
 import streamlit as st
 import os
 import sys
-from PIL import Image, ImageDraw
+from PIL import Image
 import io
 from datetime import datetime
 
@@ -27,8 +27,8 @@ from streamlit_drawable_canvas import st_canvas
 import numpy as np
 
 from core import ImageGenerator, ImageAnalyzer
-from utils.session import init_session_state, get_user_workspace_dir
-from utils.file_handler import save_uploaded_file, save_generated_images
+from utils.session import init_session_state
+from utils.file_handler import save_uploaded_file
 from components.ai_tools_panel import show_ai_tools_panel, apply_ai_tool
 from utils.project_manager import ProjectManager
 from web.common.styles import load_editor_styles
@@ -320,7 +320,6 @@ def show_canvas():
                 save_dir = os.path.join(workspace_dir, 'generated')
                 os.makedirs(save_dir, exist_ok=True)
 
-                from datetime import datetime
                 filename = f"canvas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
                 filepath = os.path.join(save_dir, filename)
 
@@ -700,7 +699,7 @@ def show_save_dam_dialog():
 
                     # Offer to open DAM
                     if st.button("📦 DAM 시스템 열기", use_container_width=True):
-                        st.switch_page("pages/02_📦_DAM_System.py")
+                        st.switch_page("pages/02_DAM_System.py")
 
                 except Exception as e:
                     st.error(f"저장 실패: {str(e)}")

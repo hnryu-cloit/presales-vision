@@ -17,6 +17,8 @@ from google.genai import types
 from dotenv import load_dotenv
 import vertexai
 
+from .logger import get_logger
+
 
 class GeminiClient:
     """
@@ -73,7 +75,8 @@ class GeminiClient:
             except Exception as e:
                 if attempt == self.max_retries - 1:
                     raise e
-                print(f"Gemini API call failed (attempt {attempt + 1}/{self.max_retries}): {e}")
+                logger = get_logger()
+                logger.warning(f"Gemini API call failed (attempt {attempt + 1}/{self.max_retries}): {e}")
                 time.sleep(delay)
                 delay *= 2
 
@@ -165,7 +168,8 @@ class GeminiClient:
             # Add reference images
             for image_path in reference_images:
                 if not os.path.exists(image_path):
-                    print(f"Warning: Image not found: {image_path}")
+                    logger = get_logger()
+                    logger.warning(f"Image not found: {image_path}")
                     continue
 
                 with open(image_path, "rb") as f:
@@ -225,7 +229,8 @@ def encode_image_to_base64(file_path: str) -> Optional[str]:
         with open(file_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode("utf-8")
     except FileNotFoundError:
-        print(f"Error: File not found: {file_path}")
+        logger = get_logger()
+        logger.error(f"File not found: {file_path}")
         return None
 
 
@@ -235,5 +240,6 @@ def load_image_bytes(file_path: str) -> Optional[bytes]:
         with open(file_path, "rb") as image_file:
             return image_file.read()
     except FileNotFoundError:
-        print(f"Error: File not found: {file_path}")
+        logger = get_logger()
+        logger.error(f"File not found: {file_path}")
         return None

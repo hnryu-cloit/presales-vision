@@ -11,11 +11,12 @@ This module provides AI-powered product image analysis:
 
 import os
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from .gemini_client import GeminiClient
 from .prompt_templates import PromptTemplates
 from .config import PRODUCT_CATEGORY, PRODUCT_ATTRIBUTE, COMMON_ATTRIBUTE
+from .logger import get_logger
 
 
 class ImageAnalyzer:
@@ -57,37 +58,38 @@ class ImageAnalyzer:
         Returns:
             Dictionary containing all analysis results
         """
-        print(f"\n{'='*60}")
-        print(f"Analyzing: {os.path.basename(image_path)}")
-        print(f"{'='*60}")
+        logger = get_logger()
+        logger.info(f"{'='*60}")
+        logger.info(f"Analyzing: {os.path.basename(image_path)}")
+        logger.info(f"{'='*60}")
 
         try:
             # Step 1: Category Classification
-            print("Step 1/4: Classifying product category...")
+            logger.info("Step 1/4: Classifying product category...")
             category_data = self._analyze_category(image_path, brand)
             main_category = category_data.get('category', '')
             sub_category = category_data.get('sub_category', '')
-            print(f"  ✓ Category: {main_category} > {sub_category}")
+            logger.info(f"  Category: {main_category} > {sub_category}")
 
             # Step 2: Product-Specific Attributes
-            print("Step 2/4: Extracting product-specific attributes...")
+            logger.info("Step 2/4: Extracting product-specific attributes...")
             product_attributes = self._analyze_product_attributes(
                 image_path, brand, main_category
             )
-            print(f"  ✓ Found {len(product_attributes)} product attributes")
+            logger.info(f"  Found {len(product_attributes)} product attributes")
 
             # Step 3: Common Attributes
-            print("Step 3/4: Extracting common attributes...")
+            logger.info("Step 3/4: Extracting common attributes...")
             common_attributes = self._analyze_common_attributes(image_path)
-            print(f"  ✓ Found {len(common_attributes)} common attributes")
+            logger.info(f"  Found {len(common_attributes)} common attributes")
 
             # Step 4: Generate Description
-            print("Step 4/4: Generating product description...")
+            logger.info("Step 4/4: Generating product description...")
             all_attributes = {**product_attributes, **common_attributes}
             description = self._generate_description(
                 main_category, sub_category, all_attributes
             )
-            print(f"  ✓ Description generated")
+            logger.info("  Description generated")
 
             # Compile result
             result = {
@@ -107,14 +109,14 @@ class ImageAnalyzer:
             if save_metadata:
                 self._save_metadata(result)
 
-            print(f"{'='*60}")
-            print(f"✓ Analysis complete!")
-            print(f"{'='*60}\n")
+            logger.info(f"{'='*60}")
+            logger.info("Analysis complete!")
+            logger.info(f"{'='*60}")
 
             return result
 
         except Exception as e:
-            print(f"✗ Error analyzing {image_path}: {e}")
+            logger.error(f"Error analyzing {image_path}: {e}")
             raise
 
     def analyze_batch(
@@ -134,19 +136,20 @@ class ImageAnalyzer:
         """
         results = []
         total = len(image_paths)
+        logger = get_logger()
 
-        print(f"\n🔍 Starting batch analysis ({total} images)...\n")
+        logger.info(f"Starting batch analysis ({total} images)...")
 
         for idx, image_path in enumerate(image_paths, 1):
-            print(f"[{idx}/{total}] {os.path.basename(image_path)}")
+            logger.info(f"[{idx}/{total}] {os.path.basename(image_path)}")
             try:
                 result = self.analyze_image(image_path, brand=brand)
                 results.append(result)
             except Exception as e:
-                print(f"  ✗ Skipping due to error: {e}\n")
+                logger.warning(f"  Skipping due to error: {e}")
                 continue
 
-        print(f"\n✓ Batch analysis complete: {len(results)}/{total} succeeded\n")
+        logger.info(f"Batch analysis complete: {len(results)}/{total} succeeded")
         return results
 
     # ================================================================
@@ -178,7 +181,8 @@ class ImageAnalyzer:
         brand_attributes = PRODUCT_ATTRIBUTE.get(brand, {})
 
         if category not in brand_attributes:
-            print(f"  ⚠ No specific attributes defined for {category}")
+            logger = get_logger()
+            logger.warning(f"No specific attributes defined for {category}")
             return {}
 
         attributes_config = brand_attributes[category]
@@ -238,5 +242,6 @@ class ImageAnalyzer:
         with open(metadata_path, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-        print(f"  💾 Metadata saved: {metadata_path}")
+        logger = get_logger()
+        logger.info(f"Metadata saved: {metadata_path}")
         return metadata_path

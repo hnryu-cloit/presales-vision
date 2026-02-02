@@ -18,15 +18,16 @@ import os
 import sys
 from PIL import Image
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict
 import json
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from core import ImageAnalyzer
+from core.logger import get_logger
 from utils.session import init_session_state
-from utils.file_handler import save_uploaded_file, get_user_images
+from utils.file_handler import save_uploaded_file
 
 # Page configuration
 st.set_page_config(
@@ -362,7 +363,7 @@ def show_asset_grid(assets: List[Dict]):
                         st.session_state.reference_images = []
                         st.session_state.current_project_path = None
                         st.session_state.current_project_name = None
-                        st.switch_page("pages/01_🎨_Image_Editor.py")
+                        st.switch_page("pages/01_Image_Editor.py")
                     except Exception as e:
                         st.error(f"이미지 로드 실패: {str(e)}")
 
@@ -425,7 +426,7 @@ def show_asset_list(assets: List[Dict]):
                     st.session_state.reference_images = []
                     st.session_state.current_project_path = None
                     st.session_state.current_project_name = None
-                    st.switch_page("pages/01_🎨_Image_Editor.py")
+                    st.switch_page("pages/01_Image_Editor.py")
                 except Exception as e:
                     st.error(f"이미지 로드 실패: {str(e)}")
 
@@ -501,98 +502,7 @@ def show_asset_column(assets: List[Dict]):
                 st.rerun()
 
 
-def show_asset_preview_sidebar():
-    """Show asset preview and metadata in sidebar."""
-    if 'selected_asset_for_preview' not in st.session_state:
-        return
 
-    asset = st.session_state.selected_asset_for_preview
-
-    with st.sidebar:
-        st.markdown("### 📋 자산 상세 정보")
-
-        # Close button
-        if st.button("✖️ 닫기", use_container_width=True):
-            del st.session_state.selected_asset_for_preview
-            st.rerun()
-
-        st.markdown("---")
-
-        # Image preview
-        try:
-            image = Image.open(asset['path'])
-            st.image(image, use_container_width=True)
-        except:
-            st.error("이미지 로드 실패")
-
-        # Basic info
-        st.markdown(f"**파일명:** {asset['filename']}")
-        st.markdown(f"**카테고리:** {asset['category']}")
-        st.markdown(f"**폴더:** {asset['folder']}")
-        st.markdown(f"**크기:** {asset['size'] // 1024} KB")
-        st.markdown(f"**생성일:** {asset['created'].strftime('%Y-%m-%d %H:%M')}")
-        st.markdown(f"**수정일:** {asset['modified'].strftime('%Y-%m-%d %H:%M')}")
-
-        # Tags
-        if asset['tags']:
-            st.markdown("**태그:**")
-            tags_html = ' '.join([f'<span class="tag-badge">{tag}</span>' for tag in asset['tags']])
-            st.markdown(tags_html, unsafe_allow_html=True)
-
-        # Description
-        if asset['description']:
-            st.markdown("**설명:**")
-            st.caption(asset['description'])
-
-        # Metadata
-        if asset['metadata']:
-            with st.expander("📊 전체 메타데이터"):
-                st.json(asset['metadata'])
-
-        st.markdown("---")
-
-        # Actions
-        st.markdown("### 🎬 작업")
-
-        if st.button("📝 이미지 에디터로 열기", use_container_width=True):
-            # Load this asset into Image Editor
-            try:
-                image = Image.open(asset['path'])
-
-                # Clear previous editor state and load new image
-                st.session_state.current_canvas_image = image
-                st.session_state.canvas_history = [image.copy()]
-                st.session_state.reference_images = []
-                st.session_state.current_project_path = None
-                st.session_state.current_project_name = None
-
-                st.success(f"✅ '{asset['filename']}'을(를) 이미지 에디터로 불러왔습니다!")
-                st.switch_page("pages/01_🎨_Image_Editor.py")
-            except Exception as e:
-                st.error(f"이미지 로드 실패: {str(e)}")
-
-        if st.button("🔄 메타데이터 재생성", use_container_width=True):
-            with st.spinner("AI가 메타데이터를 분석하고 있습니다..."):
-                try:
-                    analyzer = ImageAnalyzer(st.session_state.user['workspace_dir'])
-                    new_metadata = analyzer.analyze_image(asset['path'], save_metadata=True)
-
-                    # Update asset metadata
-                    asset['metadata'] = new_metadata
-                    st.success("✅ 메타데이터 재생성 완료!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"메타데이터 생성 실패: {str(e)}")
-
-        # Download
-        with open(asset['path'], 'rb') as file:
-            st.download_button(
-                label="⬇️ 다운로드",
-                data=file,
-                file_name=asset['filename'],
-                mime="image/png",
-                use_container_width=True
-            )
 
 
 def batch_delete_assets(assets: List[Dict], workspace_dir: str) -> int:
@@ -625,7 +535,8 @@ def batch_delete_assets(assets: List[Dict], workspace_dir: str) -> int:
                 os.remove(metadata_path)
 
         except Exception as e:
-            print(f"Error deleting {asset['filename']}: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error deleting {asset['filename']}: {str(e)}")
 
     return deleted_count
 
@@ -672,7 +583,8 @@ def batch_add_tags(assets: List[Dict], tags: List[str], workspace_dir: str) -> i
             updated_count += 1
 
         except Exception as e:
-            print(f"Error updating tags for {asset['filename']}: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error updating tags for {asset['filename']}: {str(e)}")
 
     return updated_count
 
@@ -714,7 +626,8 @@ def batch_move_assets(assets: List[Dict], target_folder: str, workspace_dir: str
             moved_count += 1
 
         except Exception as e:
-            print(f"Error moving {asset['filename']}: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error moving {asset['filename']}: {str(e)}")
 
     return moved_count
 
@@ -825,12 +738,131 @@ def show_upload_section():
                         st.rerun()
 
 
+def show_sidebar():
+    """Show sidebar with navigation and asset preview."""
+    with st.sidebar:
+        # Page navigation
+        page_options = {
+            "🏠 홈": "app.py",
+            "🎨 Image Editor": "pages/01_Image_Editor.py",
+            "📊 DAM System": "pages/02_DAM_System.py",
+            "⚙️ Settings": "pages/03_Settings.py"
+        }
+
+        try:
+            current_script_path = os.path.basename(__file__)
+        except NameError:
+            current_script_path = "02_DAM_System.py"
+
+        page_titles = list(page_options.keys())
+        current_page_index = 2  # Default to DAM System
+        for i, path in enumerate(page_options.values()):
+            if path.endswith(current_script_path):
+                current_page_index = i
+                break
+
+        selected_page = st.radio(
+            "메뉴",
+            page_titles,
+            index=current_page_index,
+            key="sidebar_radio",
+            label_visibility="collapsed"
+        )
+        st.sidebar.markdown("---")
+
+        # Switch page if selection changes
+        selected_page_path = page_options[selected_page]
+        if not selected_page_path.endswith(current_script_path):
+            st.switch_page(selected_page_path)
+
+        # Asset Preview Section (if an asset is selected)
+        if 'selected_asset_for_preview' in st.session_state:
+            asset = st.session_state.selected_asset_for_preview
+
+            st.markdown("### 📋 자산 상세 정보")
+
+            # Close button
+            if st.button("✖️ 닫기", use_container_width=True):
+                del st.session_state.selected_asset_for_preview
+                st.rerun()
+
+            st.markdown("---")
+
+            # Image preview
+            try:
+                image = Image.open(asset['path'])
+                st.image(image, use_container_width=True)
+            except:
+                st.error("이미지 로드 실패")
+
+            # Basic info
+            st.markdown(f"**파일명:** {asset['filename']}")
+            st.markdown(f"**카테고리:** {asset['category']}")
+            st.markdown(f"**폴더:** {asset['folder']}")
+            st.markdown(f"**크기:** {asset['size'] // 1024} KB")
+            st.markdown(f"**생성일:** {asset['created'].strftime('%Y-%m-%d %H:%M')}")
+            st.markdown(f"**수정일:** {asset['modified'].strftime('%Y-%m-%d %H:%M')}")
+
+            # Tags
+            if asset['tags']:
+                st.markdown("**태그:**")
+                tags_html = ' '.join([f'<span class="tag-badge">{tag}</span>' for tag in asset['tags']])
+                st.markdown(tags_html, unsafe_allow_html=True)
+
+            # Description
+            if asset['description']:
+                st.markdown("**설명:**")
+                st.caption(asset['description'])
+
+            # Metadata
+            if asset['metadata']:
+                with st.expander("📊 전체 메타데이터"):
+                    st.json(asset['metadata'])
+
+            st.markdown("---")
+
+            # Actions
+            st.markdown("### 🎬 작업")
+
+            if st.button("📝 이미지 에디터로 열기", use_container_width=True):
+                try:
+                    image = Image.open(asset['path'])
+                    st.session_state.current_canvas_image = image
+                    st.session_state.canvas_history = [image.copy()]
+                    st.session_state.reference_images = []
+                    st.session_state.current_project_path = None
+                    st.session_state.current_project_name = None
+                    st.success(f"✅ '{asset['filename']}'을(를) 이미지 에디터로 불러왔습니다!")
+                    st.switch_page("pages/01_Image_Editor.py")
+                except Exception as e:
+                    st.error(f"이미지 로드 실패: {str(e)}")
+
+            if st.button("🔄 메타데이터 재생성", use_container_width=True):
+                with st.spinner("AI가 메타데이터를 분석하고 있습니다..."):
+                    try:
+                        analyzer = ImageAnalyzer(st.session_state.user['workspace_dir'])
+                        new_metadata = analyzer.analyze_image(asset['path'], save_metadata=True)
+                        asset['metadata'] = new_metadata
+                        st.success("✅ 메타데이터 재생성 완료!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"메타데이터 생성 실패: {str(e)}")
+
+            with open(asset['path'], 'rb') as file:
+                st.download_button(
+                    label="⬇️ 다운로드",
+                    data=file,
+                    file_name=asset['filename'],
+                    mime="image/png",
+                    use_container_width=True
+                )
+
 def main():
     """Main entry point for DAM System page."""
     init_dam_state()
 
     # Show asset preview sidebar if selected
-    show_asset_preview_sidebar()
+    show_sidebar()
 
     # Header
     st.title("📦 디지털 자산 관리 (DAM)")

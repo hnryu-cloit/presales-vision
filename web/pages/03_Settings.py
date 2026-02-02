@@ -8,7 +8,6 @@ User profile and application settings.
 import streamlit as st
 import os
 import sys
-from datetime import datetime
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -189,33 +188,6 @@ def show_workspace_stats():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-
-def show_workspace_path():
-    """Render workspace path information."""
-    st.markdown('<div class="setting-card">', unsafe_allow_html=True)
-    st.markdown('<div class="setting-title">📁 워크스페이스 경로</div>', unsafe_allow_html=True)
-
-    workspace_dir = st.session_state.user['workspace_dir']
-
-    st.code(workspace_dir)
-
-    st.caption("**폴더 구조:**")
-    st.caption(f"• {workspace_dir}/uploads/ - 업로드된 이미지")
-    st.caption(f"• {workspace_dir}/generated/ - AI 생성 이미지")
-    st.caption(f"• {workspace_dir}/metadata/ - 메타데이터 JSON 파일")
-    st.caption(f"• {workspace_dir}/projects/ - 프로젝트 파일")
-
-    if st.button("📂 Finder에서 열기"):
-        try:
-            import subprocess
-            subprocess.run(['open', workspace_dir])
-            st.success("Finder가 열렸습니다.")
-        except Exception as e:
-            st.error(f"폴더를 열 수 없습니다: {str(e)}")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
 def show_app_preferences():
     """Render application preferences."""
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
@@ -269,34 +241,6 @@ def show_app_preferences():
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def show_about():
-    """Render about section."""
-    st.markdown('<div class="setting-card">', unsafe_allow_html=True)
-    st.markdown('<div class="setting-title">ℹ️ 정보</div>', unsafe_allow_html=True)
-
-    st.markdown("""
-    **CEN AI DAM Editor**
-    - 버전: 1.0.0 MVP
-    - 빌드: 2025-02-01
-    - 상태: 프로덕션 준비 완료
-
-    **기술 스택:**
-    - Frontend: Streamlit 1.51.0
-    - AI Engine: Google Gemini 2.0/2.5
-    - Backend: Python 3.8+
-    - Image Processing: Pillow 11.3.0
-
-    **개발:**
-    - 조직: ITCEN CLOIT
-    - 프로젝트: CEN AI DAM Editor
-
-    **문의:**
-    - Email: cloit@itcen.com
-    """)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
 def show_danger_zone():
     """Render danger zone section."""
     st.markdown('<div class="setting-card" style="border-color: #dc3545;">', unsafe_allow_html=True)
@@ -343,9 +287,48 @@ def show_danger_zone():
     st.markdown('</div>', unsafe_allow_html=True)
 
 
+def show_sidebar():
+    """Show sidebar with navigation."""
+    with st.sidebar:
+        # Page navigation
+        page_options = {
+            "🏠 홈": "app.py",
+            "🎨 Image Editor": "pages/01_Image_Editor.py",
+            "📊 DAM System": "pages/02_DAM_System.py",
+            "⚙️ Settings": "pages/03_Settings.py"
+        }
+
+        try:
+            current_script_path = os.path.basename(__file__)
+        except NameError:
+            current_script_path = "03_Settings.py"
+
+        page_titles = list(page_options.keys())
+        current_page_index = 3  # Default to Settings
+        for i, path in enumerate(page_options.values()):
+            if path.endswith(current_script_path):
+                current_page_index = i
+                break
+
+        selected_page = st.radio(
+            "메뉴",
+            page_titles,
+            index=current_page_index,
+            key="sidebar_radio",
+            label_visibility="collapsed"
+        )
+        st.sidebar.markdown("---")
+
+        # Switch page if selection changes
+        selected_page_path = page_options[selected_page]
+        if not selected_page_path.endswith(current_script_path):
+            st.switch_page(selected_page_path)
+
+
 def main():
     """Main entry point for Settings page."""
     init_session_state()
+    show_sidebar()
 
     st.title("⚙️ 설정")
 
@@ -355,14 +338,8 @@ def main():
     # Workspace Statistics
     show_workspace_stats()
 
-    # Workspace Path
-    show_workspace_path()
-
     # App Preferences
     show_app_preferences()
-
-    # About
-    show_about()
 
     # Danger Zone
     show_danger_zone()

@@ -9,10 +9,11 @@ Supports various templates: SNS/Marketing, Detail Page, Studio Shooting, etc.
 import os
 import json
 from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 from .gemini_client import GeminiClient
 from .prompt_templates import PromptTemplates
+from .logger import get_logger
 
 
 class ImageGenerator:
@@ -310,9 +311,10 @@ class ImageGenerator:
             List of saved file paths
         """
         saved_files = []
+        logger = get_logger()
 
         if not image_data:
-            print("Warning: No images generated")
+            logger.warning("No images generated")
             return saved_files
 
         # Handle multiple images
@@ -322,13 +324,13 @@ class ImageGenerator:
                 indexed_path = f"{base}_{idx + 1}{ext}"
                 with open(indexed_path, 'wb') as f:
                     f.write(data.data)
-                print(f"✓ Image saved: {indexed_path}")
+                logger.info(f"Image saved: {indexed_path}")
                 saved_files.append(indexed_path)
         else:
             # Single image
             with open(output_path, 'wb') as f:
                 f.write(image_data[0].data)
-            print(f"✓ Image saved: {output_path}")
+            logger.info(f"Image saved: {output_path}")
             saved_files.append(output_path)
 
         return saved_files

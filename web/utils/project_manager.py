@@ -6,12 +6,15 @@ Handle saving and loading of editor projects.
 """
 
 import os
+import sys
 import json
 from datetime import datetime
 from typing import Dict, List, Optional
 from PIL import Image
-import base64
-import io
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from core.logger import get_logger
 
 
 class ProjectManager:
@@ -148,7 +151,8 @@ class ProjectManager:
             }
 
         except Exception as e:
-            print(f"Error loading project: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error loading project: {str(e)}")
             return None
 
     def list_projects(self) -> List[Dict]:
@@ -191,7 +195,8 @@ class ProjectManager:
                         })
 
                     except Exception as e:
-                        print(f"Error reading project {item}: {str(e)}")
+                        logger = get_logger()
+                        logger.error(f"Error reading project {item}: {str(e)}")
 
         # Sort by modified date (newest first)
         projects.sort(key=lambda x: x.get('modified_at', ''), reverse=True)
@@ -217,7 +222,8 @@ class ProjectManager:
                 return True
 
         except Exception as e:
-            print(f"Error deleting project: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error deleting project: {str(e)}")
 
         return False
 
@@ -306,7 +312,8 @@ class ProjectManager:
             return True
 
         except Exception as e:
-            print(f"Error updating project: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error updating project: {str(e)}")
             return False
 
     def export_project(self, project_path: str, export_path: str) -> bool:
@@ -333,5 +340,6 @@ class ProjectManager:
             return True
 
         except Exception as e:
-            print(f"Error exporting project: {str(e)}")
+            logger = get_logger()
+            logger.error(f"Error exporting project: {str(e)}")
             return False

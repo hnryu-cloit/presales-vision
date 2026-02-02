@@ -6,11 +6,15 @@ Functions for uploading, saving, and loading images.
 """
 
 import os
-import shutil
 from datetime import datetime
 from typing import Optional, List
 from PIL import Image
 import streamlit as st
+
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from core.logger import get_logger
 
 
 def save_uploaded_file(uploaded_file, workspace_dir: str) -> str:
@@ -181,8 +185,9 @@ def cleanup_old_files(workspace_dir: str, folder: str = 'uploads', max_age_days:
         file_age = current_time - os.path.getmtime(filepath)
 
         if file_age > max_age_seconds:
+            logger = get_logger()
             try:
                 os.remove(filepath)
-                print(f"Deleted old file: {filename}")
+                logger.info(f"Deleted old file: {filename}")
             except Exception as e:
-                print(f"Failed to delete {filename}: {e}")
+                logger.error(f"Failed to delete {filename}: {e}")

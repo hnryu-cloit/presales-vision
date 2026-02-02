@@ -71,6 +71,10 @@ AI 기반의 자동화 기능을 통해 콘텐츠 제작 워크플로우를 획�
   - 카테고리별 속성 정의
 - `prompt_templates.py`: AI 프롬프트 템플릿
   - 8가지 템플릿 유형별 최적화된 프롬프트
+- `logger.py`: 중앙화된 로깅 시스템
+  - 컬러 로그 출력 (colorlog 기반)
+  - 함수 실행 시간 측정 데코레이터
+  - 전역 로거 인스턴스 관리
 
 ## 4. 설치 및 실행 방법
 
@@ -124,7 +128,8 @@ presales-vision/
 │   ├── config.py                  # 제품 카테고리 및 속성 설정
 │   ├── prompt_templates.py        # AI 프롬프트 템플릿
 │   ├── image_generator.py         # 이미지 생성 엔진
-│   └── image_analyzer.py          # 이미지 분석 엔진
+│   ├── image_analyzer.py          # 이미지 분석 엔진
+│   └── logger.py                  # 중앙화된 로깅 시스템
 │
 ├── web/                            # Streamlit 웹 애플리케이션
 │   ├── app.py                     # 메인 대시보드

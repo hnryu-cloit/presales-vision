@@ -21,7 +21,7 @@ from web.common.styles import load_app_styles
 
 # Page configuration
 st.set_page_config(
-    page_title="CEN AI DAM Editor",
+    page_title="AgentGo Creative",
     page_icon="🎨",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -30,17 +30,48 @@ st.set_page_config(
 # Custom CSS
 load_app_styles()
 
-
 def show_sidebar():
-    """Render sidebar with recent projects."""
     with st.sidebar:
-        # Logo
-        st.markdown("### ITCEN CLOIT")
-        st.markdown("---")
+        # Page navigation
+        page_options = {
+            "🏠 홈": "app.py",
+            "🎨 Image Editor": "pages/01_Image_Editor.py",
+            "📊 DAM System": "pages/02_DAM_System.py",
+            "⚙️ Settings": "pages/03_Settings.py"
+        }
+
+        # Get the current script path to determine the active page
+        try:
+            # This works when the script is run directly
+            current_script_path = os.path.basename(__file__)
+        except NameError:
+            # This is a fallback for Streamlit's execution environment
+            current_script_path = os.path.basename(st.main.__file__)
+
+        # Find the index of the current page
+        page_titles = list(page_options.keys())
+        current_page_index = 0  # Default to Home
+        for i, path in enumerate(page_options.values()):
+            if path.endswith(current_script_path):
+                current_page_index = i
+                break
+
+        selected_page = st.radio(
+            "메뉴",
+            page_titles,
+            index=current_page_index,
+            key="sidebar_radio",
+            label_visibility="collapsed"
+        )
+        st.sidebar.markdown("---")
+
+        # Switch page if selection changes
+        selected_page_path = page_options[selected_page]
+        if not selected_page_path.endswith(current_script_path):
+            st.switch_page(selected_page_path)
 
         # Recent projects
         st.markdown("### 최근 프로젝트")
-
         for project in st.session_state.recent_projects:
             with st.container():
                 st.markdown(f"""
@@ -51,6 +82,17 @@ def show_sidebar():
                 """, unsafe_allow_html=True)
                 if st.button("열기", key=f"open_{project['name']}", use_container_width=True):
                     st.info(f"'{project['name']}' 프로젝트 열기 (구현 예정)")
+
+        st.sidebar.markdown("---")
+
+        # Copyright 정보
+        st.sidebar.markdown("""
+        <div style='text-align: center; font-size: 1rem; color: #888; padding: 0.5rem 0;'>
+            Copyright © 2026<br>
+            ITCEN CLOIT<br>
+            All rights reserved.
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def show_header():
@@ -89,7 +131,7 @@ def show_welcome_section():
     # Create Now button
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        if st.button("Create Project", key="create_now", use_container_width=True, type="primary"):
+        if st.button("🥰Create Now", key="create_now", use_container_width=True, type="primary"):
             st.switch_page("pages/01_Image_Editor.py")
 
 
@@ -146,15 +188,15 @@ def show_template_gallery():
 
     for idx, template in enumerate(templates):
         with cols[idx % 4]:
-            # Create a clickable card using st.button and custom HTML content
-            button_label = f"""
-            <div class="template-card" style="margin-bottom: 0;">
+            st.markdown(f"""
+            <div class="template-card">
                 <div class="template-icon">{template['icon']}</div>
                 <div class="template-title">{template['title']}</div>
                 <div class="template-desc">{template['desc']}</div>
             </div>
-            """
-            if st.button(button_label, key=f"template_{idx}", use_container_width=True, unsafe_allow_html=True):
+            """, unsafe_allow_html=True)
+
+            if st.button("선택", key=f"template_{idx}", use_container_width=True):
                 # Show template dialog
                 if template['title'] in [
                     'SNS/마케팅 광고 소재',
@@ -183,14 +225,6 @@ def main():
     # Main content area
     show_welcome_section()
     show_template_gallery()
-
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style='text-align: center; color: #999; font-size: 12px; padding: 20px 0;'>
-        CEN AI DAM Editor v1.0.0 | Powered by Google Gemini AI | 2025 ITCEN CLOIT
-    </div>
-    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ Features: Background Removal, Style Transfer, Image Upscaling, Object Operations
 """
 
 import streamlit as st
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 from PIL import Image
 import os
 import sys
