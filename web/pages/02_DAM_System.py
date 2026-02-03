@@ -26,8 +26,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from core import ImageAnalyzer
 from core.logger import get_logger
-from utils.session import init_session_state
-from utils.file_handler import save_uploaded_file
+from web.utils.session import init_session_state
+from web.utils.file_handler import save_uploaded_file
 
 # Page configuration
 st.set_page_config(

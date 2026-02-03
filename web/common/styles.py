@@ -11,87 +11,29 @@ def load_app_styles():
     """Loads the CSS for the main application (app.py)."""
     st.markdown("""
 <style>
-    /* Main colors */
+    /* Main colors - 통일된 색상 체계 */
     :root {
         --primary-color: #A23B72;
+        --primary-dark: #8B2E5F;
         --sidebar-bg: #273444;
         --main-bg: #f8f9fa;
-    }
 
-    /* Apply main gradient background to the entire app view container */
-    [data-testid="stAppViewContainer"] {
-        background: radial-gradient(120% 100% at 50% -20%, rgba(86, 157, 255, 0.15) 0%, rgba(0, 85, 233, 0.08) 30%, rgba(0, 85, 233, 0) 60%), radial-gradient(80% 80% at 80% 80%, rgba(106, 20, 217, 0.12) 0%, rgba(0, 203, 200, 0.08) 40%, rgba(0, 203, 200, 0) 70%), linear-gradient(180deg, #FFFFFF 0%, rgba(240, 245, 255, 0.6) 25%, rgba(227, 238, 255, 0.7) 50%, rgba(217, 230, 255, 0.5) 75%, #FFFFFF 100%);
+        /* 텍스트 색상 - 시인성 개선 */
+        --text-primary: #1a202c;      /* 주요 텍스트 - 진한 검정 */
+        --text-secondary: #2d3748;    /* 보조 텍스트 - 어두운 회색 */
+        --text-tertiary: #4a5568;     /* 부가 텍스트 - 중간 회색 */
+        --text-caption: #5a6878;      /* 캡션/날짜 - 밝은 회색 (충분한 대비) */
+        --text-muted: #718096;        /* 약한 텍스트 - 최소 대비 보장 */
     }
-
-    /* Main content area should have no background so the stAppViewContainer background shows through */
-    [data-testid="stAppViewContainer"] > .main {
-        background-color: transparent; /* Ensure no opaque background */
-        padding-top: 72px; /* Add padding to push content below the new header */
-    }
-
-    /* New Header Style */
-    [data-testid="stAppViewContainer"] > .main > [data-testid="stBlock"]:first-child {
-        display: flex;
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
-        padding: 24px 32px 25px;
-        position: absolute;
-        width: 100%; /* Use 100% for responsiveness */
-        height: 72px;
-        right: 0px;
-        top: 0px;
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(10px);
-        z-index: 100; /* High z-index to stay on top */
-    }
-
-    /* New Sidebar Style */
-    [data-testid="stSidebar"] {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        padding: 0px;
-        position: absolute;
-        width: 280px;
-        height: calc(100vh - 72px); /* Full height minus header */
-        left: 0px;
-        top: 72px;
-        overflow-y: auto; /* Changed to auto for vertical scrolling */
-        overflow-x: hidden;
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(10px);
-        border: none; /* Override default border */
-        color: #000; /* Default text color for light background */
-    }
-
-    /* Sidebar Text Coloring */
-    [data-testid="stSidebar"] h3 { /* Main Text: "최근 프로젝트" */
-        color: #0950E8;
-    }
-
-    /* Adjust radio button styling for new sidebar background (Main Text) */
-    [data-testid="stSidebar"] .st-emotion-cache-1gwan56 { /* Selector for radio button labels */
-        color: #0950E8;
-    }
-
-    [data-testid="stSidebar"] .project-title { /* Main Text: Project names */
-        color: #0950E8;
-    }
-
-    [data-testid="stSidebar"] .project-date { /* Sub Text: Project dates */
-        color: #5F1BDB;
-    }
-
-    /* Sub Text: Copyright information */
-    [data-testid="stSidebar"] > div > div:nth-last-child(1) > div > div > div[data-testid="stMarkdownContainer"] {
-        color: #5F1BDB;
-    }
-
 
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+
+    /* Hide default multipage navigation */
+    [data-testid="stSidebarNav"] {
+        display: none;
+    }
 
     /* Template card styling */
     .template-card {
@@ -121,13 +63,13 @@ def load_app_styles():
     .template-title {
         font-size: 18px;
         font-weight: 600;
-        color: #273444;
+        color: var(--text-primary);
         margin-bottom: 8px;
     }
 
     .template-desc {
         font-size: 13px;
-        color: #666;
+        color: var(--text-tertiary);
         line-height: 1.5;
     }
 
@@ -168,13 +110,13 @@ def load_app_styles():
     .project-title {
         font-size: 14px;
         font-weight: 600;
-        color: #273444;
+        color: var(--text-primary);
         margin-bottom: 4px;
     }
 
     .project-date {
         font-size: 12px;
-        color: #999;
+        color: var(--text-caption);
     }
 
     .link-button {
@@ -298,7 +240,7 @@ def load_editor_styles():
         font-size: 16px;
         font-weight: 600;
         margin-bottom: 16px;
-        color: #273444;
+        color: var(--text-primary, #1a202c);
     }
 
     .history-item {
@@ -349,14 +291,14 @@ def load_editor_styles():
     /* Canvas placeholder */
     .canvas-placeholder {
         background: white;
-        border: 2px dashed #ccc;
+        border: 2px dashed #a0aec0;
         border-radius: 12px;
         min-height: 500px;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        color: #999;
+        color: var(--text-tertiary, #4a5568);
     }
 </style>
 """, unsafe_allow_html=True)

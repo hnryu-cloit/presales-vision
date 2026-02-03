@@ -30,8 +30,8 @@ from core import ImageGenerator, ImageAnalyzer
 from utils.session import init_session_state
 from utils.file_handler import save_uploaded_file
 from components.ai_tools_panel import show_ai_tools_panel, apply_ai_tool
+from components.template_form import show_template_dialog
 from utils.project_manager import ProjectManager
-from web.common.styles import load_editor_styles
 
 # Page configuration
 st.set_page_config(
@@ -41,8 +41,113 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
-load_editor_styles()
+# Custom CSS for Image Editor
+st.markdown("""
+<style>
+    /* Hide default sidebar and multipage nav */
+    [data-testid="stSidebar"] {
+        display: none;
+    }
+    [data-testid="stSidebarNav"] {
+        display: none;
+    }
+
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+
+    /* Tool card styling */
+    .tool-card {
+        background: white;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 12px 8px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .tool-card:hover {
+        border-color: #A23B72;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(162, 59, 114, 0.15);
+    }
+
+    .tool-card.selected {
+        border-color: #A23B72;
+        background: linear-gradient(135deg, rgba(162, 59, 114, 0.1) 0%, rgba(139, 46, 95, 0.1) 100%);
+    }
+
+    .tool-icon {
+        font-size: 28px;
+        margin-bottom: 4px;
+    }
+
+    .tool-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: #273444;
+    }
+
+    /* History card styling */
+    .history-card {
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 8px;
+        margin-bottom: 12px;
+        transition: all 0.2s;
+    }
+
+    .history-card:hover {
+        border-color: #A23B72;
+        box-shadow: 0 2px 8px rgba(162, 59, 114, 0.15);
+    }
+
+    .history-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #273444;
+        margin: 8px 0 4px 0;
+    }
+
+    .history-date {
+        font-size: 11px;
+        color: #718096;
+    }
+
+    /* Canvas placeholder */
+    .canvas-placeholder {
+        background: white;
+        border: 2px dashed #a0aec0;
+        border-radius: 12px;
+        min-height: 500px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: #4a5568;
+    }
+
+    /* Left menu styling */
+    .left-menu-btn {
+        background: #273444;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
+        width: 100%;
+        text-align: center;
+        cursor: pointer;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 
 def init_editor_state():
@@ -53,22 +158,22 @@ def init_editor_state():
         st.session_state.current_canvas_image = None
 
     if 'canvas_history' not in st.session_state:
-        st.session_state.canvas_history = []
+        st.session_state.canvas_history = []  # List of dicts: {image, title, created_at}
 
     if 'reference_images' not in st.session_state:
         st.session_state.reference_images = []
 
     if 'current_tool' not in st.session_state:
-        st.session_state.current_tool = 'select'
-        
+        st.session_state.current_tool = 'brush'
+
     if 'stroke_width' not in st.session_state:
         st.session_state.stroke_width = 5
-        
+
     if 'stroke_color' not in st.session_state:
         st.session_state.stroke_color = '#000000'
-        
-    if 'shape_type' not in st.session_state:
-        st.session_state.shape_type = 'rect'
+
+    if 'highlighter_opacity' not in st.session_state:
+        st.session_state.highlighter_opacity = 0.4
 
     if 'reference_expanded' not in st.session_state:
         st.session_state.reference_expanded = True
@@ -79,371 +184,383 @@ def init_editor_state():
     if 'current_project_name' not in st.session_state:
         st.session_state.current_project_name = None
 
+    if 'history_counter' not in st.session_state:
+        st.session_state.history_counter = 0
+
+    if 'show_template_panel' not in st.session_state:
+        st.session_state.show_template_panel = False
+
+    if 'last_uploaded_file' not in st.session_state:
+        st.session_state.last_uploaded_file = None
+
+
+def add_to_history(image, title="AI 생성 이미지"):
+    """Add an image to history with metadata."""
+    st.session_state.history_counter += 1
+    history_item = {
+        'image': image.copy(),
+        'title': f"{title} #{st.session_state.history_counter}",
+        'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    st.session_state.canvas_history.append(history_item)
+
+
+def get_templates():
+    """Return template list matching home page."""
+    return [
+        {
+            'icon': '📱',
+            'title': 'SNS/마케팅 광고 소재',
+            'desc': '브랜드 캠페인·프로모션 등 마케팅 목적의 SNS피드, 배너, 썸네일 등'
+        },
+        {
+            'icon': '📸',
+            'title': '스튜디오 촬영 이미지 생성',
+            'desc': '패션, 화장품, 가구, 가전 등 고품질 촬영 연출 이미지'
+        },
+        {
+            'icon': '🎨',
+            'title': '스타일 기반 이미지 생성',
+            'desc': '제품 배치, 공간 연출 등 실제 사용 환경 표현'
+        },
+        {
+            'icon': '🌐',
+            'title': '다국어 변환 이미지 생성',
+            'desc': '콘텐츠를 여러 언어 이미지로 자동 변환'
+        },
+        {
+            'icon': '📊',
+            'title': '인포그래픽 이미지 생성',
+            'desc': '제품 설명서, 홍보물, 분석 리포트 시각화'
+        },
+        {
+            'icon': '🖼️',
+            'title': '삽화 이미지 생성',
+            'desc': '텍스트 기반 콘텐츠의 시각화 대표 이미지'
+        },
+        {
+            'icon': '✏️',
+            'title': '일러스트 이미지 완성',
+            'desc': '스케치 기반으로 채색·완성된 일러스트 변환'
+        },
+    ]
+
+
+def show_template_panel():
+    """Show template selection panel."""
+    st.markdown("#### 📋 템플릿 선택")
+    st.caption("원하는 템플릿을 선택하세요")
+
+    templates = get_templates()
+
+    for template in templates:
+        with st.container():
+            if st.button(
+                f"{template['icon']} {template['title']}",
+                key=f"tpl_{template['title']}",
+                use_container_width=True
+            ):
+                st.session_state.show_template_panel = False
+                show_template_dialog(template['title'])
+
+    st.markdown("---")
+    if st.button("✖️ 닫기", key="close_template_panel", use_container_width=True):
+        st.session_state.show_template_panel = False
+        st.rerun()
+
 
 def show_left_menu():
     """Render left menu panel."""
-    with st.container():
-        st.markdown("""
-        <div style='background: #273444; padding: 20px 10px; border-radius: 0 12px 12px 0; min-height: 100vh;'>
-        """, unsafe_allow_html=True)
+    st.markdown("#### 메뉴")
 
-        # Menu items
-        col = st.columns(1)[0]
+    # Template
+    if st.button("📋 템플릿", key="menu_template", use_container_width=True):
+        st.session_state.show_template_panel = not st.session_state.show_template_panel
+        st.rerun()
 
-        # Template
-        if st.button("📋\n템플릿", key="menu_template", use_container_width=True):
-            st.info("템플릿 선택 (구현 예정)")
+    # New Project
+    if st.button("➕ 새 프로젝트", key="menu_new", use_container_width=True):
+        st.session_state.current_canvas_image = None
+        st.session_state.canvas_history = []
+        st.session_state.reference_images = []
+        st.session_state.current_project_path = None
+        st.session_state.current_project_name = None
+        st.session_state.history_counter = 0
+        st.success("새 프로젝트 생성됨")
+        st.rerun()
 
-        # New Project
-        if st.button("➕\n새 프로젝트", key="menu_new", use_container_width=True):
-            st.session_state.current_canvas_image = None
-            st.session_state.canvas_history = []
-            st.session_state.reference_images = []
-            st.session_state.current_project_path = None
-            st.session_state.current_project_name = None
-            st.success("새 프로젝트 생성됨")
+    # Save Project
+    if st.button("💾 저장", key="menu_save", use_container_width=True):
+        if st.session_state.current_canvas_image is None:
+            st.warning("저장할 내용이 없습니다")
+        else:
+            st.session_state.show_save_dialog = True
             st.rerun()
 
-        # Save Project
-        if st.button("💾\n저장", key="menu_save", use_container_width=True):
-            if st.session_state.current_canvas_image is None:
-                st.warning("저장할 내용이 없습니다")
-            else:
-                st.session_state.show_save_dialog = True
-                st.rerun()
+    # Load Project
+    if st.button("📂 불러오기", key="menu_load", use_container_width=True):
+        st.session_state.show_load_dialog = True
+        st.rerun()
 
-        # Load Project
-        if st.button("📂\n불러오기", key="menu_load", use_container_width=True):
-            st.session_state.show_load_dialog = True
-            st.rerun()
+    # Upload
+    uploaded = st.file_uploader(
+        "이미지 업로드",
+        type=['png', 'jpg', 'jpeg', 'webp'],
+        key="menu_upload",
+        label_visibility="collapsed"
+    )
 
-        # Save to DAM
-        if st.button("📦\nDAM 저장", key="menu_save_dam", use_container_width=True):
-            if st.session_state.current_canvas_image is None:
-                st.warning("저장할 이미지가 없습니다")
-            else:
-                st.session_state.show_save_dam_dialog = True
-                st.rerun()
-
-        # Text
-        if st.button("T\n텍스트", key="menu_text", use_container_width=True):
-            st.info("텍스트 도구 (구현 예정)")
-
-        # Upload
-        uploaded = st.file_uploader(
-            "⬆️\n업로드",
-            type=['png', 'jpg', 'jpeg', 'webp'],
-            key="menu_upload",
-            label_visibility="collapsed"
-        )
-
-        if uploaded:
-            # Save and load uploaded image
-            workspace_dir = st.session_state.user['workspace_dir']
-            img_path = save_uploaded_file(uploaded, workspace_dir)
-
-            # Load to canvas
-            image = Image.open(img_path)
+    if uploaded:
+        # Check if this is a new file (not already processed)
+        file_id = f"{uploaded.name}_{uploaded.size}"
+        if st.session_state.last_uploaded_file != file_id:
+            st.session_state.last_uploaded_file = file_id
+            # Load directly from memory (faster than saving to disk first)
+            image = Image.open(uploaded).convert("RGB")
             st.session_state.current_canvas_image = image
-            st.session_state.canvas_history.append(image.copy())
-            st.success("이미지 업로드 완료!")
+            add_to_history(image, "업로드 이미지")
             st.rerun()
 
-        # AI Tools
-        if st.button("🤖\nAI 도구", key="menu_ai", use_container_width=True):
-            if st.session_state.current_canvas_image is None:
-                st.warning("먼저 이미지를 업로드해주세요")
-            else:
-                # Show AI tools panel
-                tool_data = show_ai_tools_panel()
+    st.markdown("---")
 
-                if tool_data:
-                    # Apply AI tool to current canvas
-                    with st.spinner(f"AI 도구 '{tool_data['tool']}' 적용 중..."):
-                        workspace_dir = st.session_state.user['workspace_dir']
-                        processed_image = apply_ai_tool(
-                            tool_data,
-                            st.session_state.current_canvas_image,
-                            workspace_dir
-                        )
-
-                        if processed_image:
-                            st.session_state.current_canvas_image = processed_image
-                            st.session_state.canvas_history.append(processed_image.copy())
-                            st.success(f"✅ '{tool_data['tool']}' 적용 완료!")
-                            st.rerun()
-
-        # Spacer
-        st.markdown("<div style='flex: 1;'></div>", unsafe_allow_html=True)
-
-        # Home
-        if st.button("🏠\n홈화면", key="menu_home", use_container_width=True):
-            st.switch_page("app.py")
-
-        st.markdown("</div>", unsafe_allow_html=True)
+    # Home
+    if st.button("🏠 홈으로", key="menu_home", use_container_width=True):
+        st.switch_page("app.py")
 
 
-def show_toolbar():
-    """Render top toolbar with drawing controls."""
-    st.markdown("### 🛠️ 툴바")
+def show_tool_cards():
+    """Render tool selection as cards."""
+    st.markdown("#### 도구 선택")
 
-    # Tool selection
     tools = [
-        ("👆", "transform", "객체선택/이동"),
-        ("✏️", "freedraw", "펜슬"),
-        ("🖍️", "freedraw", "형광펜"), # Note: Same as pencil, but could use different color/opacity
-        ("🧹", "eraser", "지우개"), # Note: Not a direct mode, handled by background color
-        ("⬜", "rect", "사각형"),
-        ("⭕", "circle", "원"),
-        ("〰️", "line", "선"),
+        {"id": "brush", "icon": "✏️", "label": "브러쉬"},
+        {"id": "highlighter", "icon": "🖍️", "label": "형광펜"},
+        {"id": "eraser", "icon": "🧹", "label": "지우개"},
     ]
-    
-    tool_ids = [tool[1] for tool in tools]
-    tool_labels = [f"{tool[0]} {tool[2]}" for tool in tools]
 
-    # Map our tool names to canvas drawing modes
-    tool_map = {
-        "select": "transform",
-        "pencil": "freedraw",
-        "highlighter": "freedraw",
-        "eraser": "freedraw", # Eraser is free drawing with background color
-        "shape": "rect", # Default shape
-        "canvas_move": "transform",
-    }
-    
-    # Update current_tool if a shape is selected
-    if st.session_state.current_tool in ["rect", "circle", "line"]:
-        st.session_state.current_tool = "shape"
+    cols = st.columns(len(tools))
 
-    selected_tool_label = tool_labels[tool_ids.index(tool_map.get(st.session_state.current_tool, "transform"))]
+    for idx, tool in enumerate(tools):
+        with cols[idx]:
+            is_selected = st.session_state.current_tool == tool["id"]
 
-    cols = st.columns([2, 1, 1, 3])
-    with cols[0]:
-        st.session_state.current_tool = st.selectbox(
-            "도구 선택", 
-            options=["select", "pencil", "highlighter", "eraser", "shape", "canvas_move"],
-            format_func=lambda x: {
-                "select": "👆 객체선택", "pencil": "✏️ 펜슬", "highlighter": "🖍️ 형광펜",
-                "eraser": "🧹 지우개", "shape": "⬜ 도형", "canvas_move": "🔲 캔버스 이동"
-            }.get(x),
-            key="tool_selector"
+            if st.button(
+                f"{tool['icon']}\n{tool['label']}",
+                key=f"tool_{tool['id']}",
+                use_container_width=True,
+                type="primary" if is_selected else "secondary"
+            ):
+                st.session_state.current_tool = tool["id"]
+                st.rerun()
+
+    # Tool settings
+    st.markdown("#### 도구 설정")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.session_state.stroke_width = st.slider(
+            "굵기", 1, 50, st.session_state.stroke_width, key="stroke_slider"
         )
 
-    # Drawing controls
-    drawing_mode = tool_map.get(st.session_state.current_tool, "transform")
-
-    with cols[1]:
-        stroke_width = st.slider("굵기", 1, 50, 5, key="stroke_width")
-
-    with cols[2]:
-        stroke_color = st.color_picker("색상", "#000000", key="stroke_color")
-        
-    # Specific controls for shape tool
-    if st.session_state.current_tool == "shape":
-        with cols[3]:
-            drawing_mode = st.radio("도형 종류", ["rect", "circle", "line"], horizontal=True, key="shape_type")
+    with col2:
+        if st.session_state.current_tool == "highlighter":
+            st.session_state.highlighter_opacity = st.slider(
+                "투명도", 0.1, 1.0, st.session_state.highlighter_opacity, key="opacity_slider"
+            )
+        elif st.session_state.current_tool != "eraser":
+            st.session_state.stroke_color = st.color_picker(
+                "색상", st.session_state.stroke_color, key="color_picker"
+            )
 
 
 def show_canvas():
     """Render main canvas area using streamlit-drawable-canvas."""
-    st.markdown("### 🎨 캔버스")
 
     if st.session_state.current_canvas_image is None:
         st.markdown("""
         <div class='canvas-placeholder'>
             <div style='font-size: 48px; margin-bottom: 16px;'>🖼️</div>
             <div style='font-size: 18px; font-weight: 600; margin-bottom: 8px;'>캔버스가 비어있습니다</div>
-            <div style='font-size: 14px;'>좌측 메뉴에서 이미지를 업로드하거나 새 프로젝트를 생성하세요</div>
+            <div style='font-size: 14px;'>좌측 메뉴에서 이미지를 업로드하세요</div>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        # Tool mapping
-        tool_map = {
-            "select": "transform",
-            "pencil": "freedraw",
-            "highlighter": "freedraw",
-            "eraser": "freedraw",
-            "shape": st.session_state.get("shape_type", "rect"),
-            "canvas_move": "transform"
-        }
-        drawing_mode = tool_map.get(st.session_state.current_tool, "transform")
-        
-        # Eraser works by drawing with the background color
-        # This is a simple implementation. A better one would handle transparency.
-        stroke_color = "#FFFFFF" if st.session_state.current_tool == "eraser" else st.session_state.stroke_color
+        return
 
-        # Set canvas properties
-        canvas_result = st_canvas(
-            fill_color="rgba(255, 165, 0, 0.3)",  # Color for shape fill
-            stroke_width=st.session_state.stroke_width,
-            stroke_color=stroke_color,
-            background_image=st.session_state.current_canvas_image,
-            update_streamlit=True,
-            height=st.session_state.current_canvas_image.height,
-            width=st.session_state.current_canvas_image.width,
-            drawing_mode=drawing_mode,
-            key="canvas",
-        )
+    # Configure drawing based on selected tool
+    current_tool = st.session_state.current_tool
 
-        # If the user has drawn something, update the image
-        if canvas_result.image_data is not None:
-            # Check if the canvas is not empty (i.e., drawings were made)
-            if not np.array_equal(
-                np.array(st.session_state.current_canvas_image), canvas_result.image_data
-            ):
-                # Convert canvas output to PIL Image
-                new_image = Image.fromarray(canvas_result.image_data).convert("RGB")
-                
-                # Update session state only if image has changed
-                # This check prevents loops on rerun
-                if not st.session_state.current_canvas_image.tobytes() == new_image.tobytes():
-                    st.session_state.current_canvas_image = new_image
-                    st.session_state.canvas_history.append(new_image.copy())
-                    st.success("드로잉 적용 완료!")
-                    st.rerun()
+    if current_tool == "eraser":
+        drawing_mode = "freedraw"
+        stroke_color = "#FFFFFF"
+        stroke_width = st.session_state.stroke_width * 2
+    elif current_tool == "highlighter":
+        drawing_mode = "freedraw"
+        # Convert hex to rgba with opacity
+        hex_color = st.session_state.stroke_color
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        opacity = st.session_state.highlighter_opacity
+        stroke_color = f"rgba({r}, {g}, {b}, {opacity})"
+        stroke_width = st.session_state.stroke_width * 2
+    else:  # brush
+        drawing_mode = "freedraw"
+        stroke_color = st.session_state.stroke_color
+        stroke_width = st.session_state.stroke_width
 
-        # Quick actions
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button("↩️ 실행취소", use_container_width=True):
-                if len(st.session_state.canvas_history) > 1:
-                    st.session_state.canvas_history.pop()
-                    st.session_state.current_canvas_image = st.session_state.canvas_history[-1].copy()
-                    st.rerun()
-                elif len(st.session_state.canvas_history) == 1:
-                     st.warning("더 이상 되돌릴 내역이 없습니다.")
+    # Get image dimensions
+    img_width = st.session_state.current_canvas_image.width
+    img_height = st.session_state.current_canvas_image.height
 
+    # Scale if too large
+    max_width = 800
+    scale = min(1.0, max_width / img_width)
+    display_width = int(img_width * scale)
+    display_height = int(img_height * scale)
 
-        with col2:
-            if st.button("💾 저장", use_container_width=True):
-                workspace_dir = st.session_state.user['workspace_dir']
-                save_dir = os.path.join(workspace_dir, 'generated')
-                os.makedirs(save_dir, exist_ok=True)
+    # Canvas
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 165, 0, 0.3)",
+        stroke_width=stroke_width,
+        stroke_color=stroke_color,
+        background_image=st.session_state.current_canvas_image,
+        update_streamlit=True,
+        height=display_height,
+        width=display_width,
+        drawing_mode=drawing_mode,
+        key="main_canvas",
+    )
 
-                filename = f"canvas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                filepath = os.path.join(save_dir, filename)
+    # Quick actions
+    col1, col2, col3, col4 = st.columns(4)
 
-                st.session_state.current_canvas_image.save(filepath)
-                st.success(f"저장 완료: {filename}")
-
-        with col3:
-            if st.button("🗑️ 초기화", use_container_width=True):
-                st.session_state.current_canvas_image = None
-                st.session_state.canvas_history = []
+    with col1:
+        if st.button("↩️ 실행취소", use_container_width=True):
+            if len(st.session_state.canvas_history) > 1:
+                st.session_state.canvas_history.pop()
+                st.session_state.current_canvas_image = st.session_state.canvas_history[-1]['image'].copy()
                 st.rerun()
+            else:
+                st.warning("더 이상 되돌릴 내역이 없습니다.")
 
-        with col4:
-            # Download button
-            if st.session_state.current_canvas_image:
-                buf = io.BytesIO()
-                st.session_state.current_canvas_image.save(buf, format='PNG')
-                byte_im = buf.getvalue()
+    with col2:
+        if st.button("💾 저장", use_container_width=True):
+            workspace_dir = st.session_state.user['workspace_dir']
+            save_dir = os.path.join(workspace_dir, 'generated')
+            os.makedirs(save_dir, exist_ok=True)
 
-                st.download_button(
-                    label="⬇️ 다운로드",
-                    data=byte_im,
-                    file_name="canvas_image.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
+            filename = f"canvas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            filepath = os.path.join(save_dir, filename)
+
+            st.session_state.current_canvas_image.save(filepath)
+            st.success(f"저장 완료: {filename}")
+
+    with col3:
+        if st.button("🗑️ 초기화", use_container_width=True):
+            st.session_state.current_canvas_image = None
+            st.session_state.canvas_history = []
+            st.session_state.history_counter = 0
+            st.rerun()
+
+    with col4:
+        if st.session_state.current_canvas_image:
+            buf = io.BytesIO()
+            st.session_state.current_canvas_image.save(buf, format='PNG')
+            byte_im = buf.getvalue()
+
+            st.download_button(
+                label="⬇️ 다운로드",
+                data=byte_im,
+                file_name="canvas_image.png",
+                mime="image/png",
+                use_container_width=True
+            )
 
 
 def show_history_panel():
-    """Render right history panel."""
-    st.markdown("### 📜 히스토리")
+    """Render right history panel with cards."""
+    st.markdown("#### 📜 히스토리")
 
     if not st.session_state.canvas_history:
-        st.info("히스토리가 비어있습니다")
-    else:
-        st.caption(f"총 {len(st.session_state.canvas_history)}개 항목")
+        st.info("히스토리가 비어있습니다.\n적용하기를 통해 이미지를 생성하세요.")
+        return
 
-        # Display history items (most recent first)
-        for idx, hist_image in enumerate(reversed(st.session_state.canvas_history)):
-            with st.container():
-                st.image(hist_image, use_container_width=True, caption=f"Step {len(st.session_state.canvas_history) - idx}")
+    st.caption(f"총 {len(st.session_state.canvas_history)}개 항목")
 
-                if st.button("복원", key=f"restore_{idx}", use_container_width=True):
-                    st.session_state.current_canvas_image = hist_image.copy()
-                    st.rerun()
+    # Display history items (most recent first)
+    for idx, hist_item in enumerate(reversed(st.session_state.canvas_history)):
+        with st.container():
+            # Image thumbnail
+            st.image(hist_item['image'], use_container_width=True)
 
-            st.markdown("---")
+            # Card info
+            st.markdown(f"""
+            <div class="history-card">
+                <div class="history-title">{hist_item['title']}</div>
+                <div class="history-date">{hist_item['created_at']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("복원", key=f"restore_{idx}", use_container_width=True):
+                st.session_state.current_canvas_image = hist_item['image'].copy()
+                st.rerun()
+
+        st.markdown("---")
 
 
 def show_prompt_area():
     """Render prompt input and apply button."""
     st.markdown("---")
-    st.markdown("### 💬 프롬프트")
+    st.markdown("#### 💬 AI 프롬프트")
 
-    col_prompt, col_btn = st.columns([5, 1])
+    prompt = st.text_area(
+        "프롬프트를 입력하세요",
+        placeholder="예: 배경을 파란색으로 변경하세요",
+        height=80,
+        key="editor_prompt",
+        label_visibility="collapsed"
+    )
 
-    with col_prompt:
-        prompt = st.text_area(
-            "프롬프트를 입력하세요",
-            placeholder="예: 배경을 파란색으로 변경하세요",
-            height=80,
-            key="editor_prompt",
-            label_visibility="collapsed"
-        )
+    if st.button("🚀 적용하기", type="primary", use_container_width=True, key="apply_prompt"):
+        if not prompt:
+            st.warning("프롬프트를 입력해주세요")
+        elif st.session_state.current_canvas_image is None:
+            st.warning("먼저 이미지를 업로드해주세요")
+        else:
+            with st.spinner("AI가 이미지를 생성하고 있습니다..."):
+                try:
+                    workspace_dir = st.session_state.user['workspace_dir']
+                    generator = ImageGenerator(os.path.join(workspace_dir, 'generated'))
 
-    with col_btn:
-        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)  # Spacer
+                    temp_path = os.path.join(workspace_dir, 'temp_canvas.png')
+                    st.session_state.current_canvas_image.save(temp_path)
 
-        if st.button("🚀 적용하기", type="primary", use_container_width=True, key="apply_prompt"):
-            if not prompt:
-                st.warning("프롬프트를 입력해주세요")
-            elif st.session_state.current_canvas_image is None:
-                st.warning("먼저 이미지를 업로드해주세요")
-            else:
-                # Generate image based on prompt
-                with st.spinner("AI가 이미지를 생성하고 있습니다..."):
-                    try:
-                        workspace_dir = st.session_state.user['workspace_dir']
-                        generator = ImageGenerator(os.path.join(workspace_dir, 'generated'))
+                    generated_paths = generator.change_attributes(
+                        image_path=temp_path,
+                        instructions=[prompt]
+                    )
 
-                        # Save current canvas image temporarily
-                        temp_path = os.path.join(workspace_dir, 'temp_canvas.png')
-                        st.session_state.current_canvas_image.save(temp_path)
+                    if generated_paths:
+                        new_image = Image.open(generated_paths[0])
+                        st.session_state.current_canvas_image = new_image
 
-                        # Generate with prompt
-                        generated_paths = generator.change_attributes(
-                            image_path=temp_path,
-                            instructions=[prompt]
-                        )
+                        # Add to history with prompt as title
+                        title = prompt[:20] + "..." if len(prompt) > 20 else prompt
+                        add_to_history(new_image, title)
 
-                        if generated_paths:
-                            # Load generated image to canvas
-                            new_image = Image.open(generated_paths[0])
-                            st.session_state.current_canvas_image = new_image
-                            st.session_state.canvas_history.append(new_image.copy())
+                        st.success("✅ 적용 완료!")
+                        st.rerun()
+                    else:
+                        st.error("이미지 생성 실패")
 
-                            st.success("✅ 적용 완료!")
-                            st.rerun()
-                        else:
-                            st.error("이미지 생성 실패")
-
-                    except Exception as e:
-                        st.error(f"오류 발생: {str(e)}")
+                except Exception as e:
+                    st.error(f"오류 발생: {str(e)}")
 
 
 def show_reference_images():
     """Render reference images accordion."""
-    st.markdown("---")
-
-    # Accordion header
-    col_header, col_toggle = st.columns([5, 1])
-
-    with col_header:
-        st.markdown("### 📎 레퍼런스 이미지")
-
-    with col_toggle:
-        if st.button("▼" if st.session_state.reference_expanded else "▶", key="toggle_reference"):
-            st.session_state.reference_expanded = not st.session_state.reference_expanded
-            st.rerun()
-
-    # Accordion content
-    if st.session_state.reference_expanded:
-        st.caption("최대 2개까지 등록 가능")
-
+    with st.expander("📎 레퍼런스 이미지 (최대 2개)", expanded=st.session_state.reference_expanded):
         reference_uploads = st.file_uploader(
             "레퍼런스 이미지 업로드",
             type=['png', 'jpg', 'jpeg', 'webp'],
@@ -453,9 +570,7 @@ def show_reference_images():
         )
 
         if reference_uploads:
-            # Limit to 2 images
             reference_uploads = reference_uploads[:2]
-
             st.session_state.reference_images = []
 
             cols = st.columns(2)
@@ -463,8 +578,6 @@ def show_reference_images():
                 with cols[idx]:
                     image = Image.open(ref_file)
                     st.image(image, caption=f"레퍼런스 {idx+1}", use_container_width=True)
-
-                    # Save to session
                     st.session_state.reference_images.append(image)
 
 
@@ -473,7 +586,6 @@ def show_save_project_dialog():
     """Show project save dialog."""
     st.markdown("### 프로젝트 저장")
 
-    # Project name input
     default_name = st.session_state.current_project_name or f"Project_{datetime.now().strftime('%Y%m%d')}"
     project_name = st.text_input(
         "프로젝트 이름",
@@ -481,7 +593,6 @@ def show_save_project_dialog():
         key="save_project_name"
     )
 
-    # Show current status
     st.markdown("**저장될 내용:**")
     st.caption(f"• 캔버스 이미지: {'있음' if st.session_state.current_canvas_image else '없음'}")
     st.caption(f"• 히스토리: {len(st.session_state.canvas_history)}개")
@@ -504,26 +615,25 @@ def show_save_project_dialog():
                 workspace_dir = st.session_state.user['workspace_dir']
                 pm = ProjectManager(workspace_dir)
 
-                # Check if updating existing project or creating new
+                # Extract images from history items
+                history_images = [item['image'] for item in st.session_state.canvas_history]
+
                 if st.session_state.current_project_path:
-                    # Update existing project
                     success = pm.update_project(
                         st.session_state.current_project_path,
                         canvas_image=st.session_state.current_canvas_image,
-                        canvas_history=st.session_state.canvas_history,
+                        canvas_history=history_images,
                         reference_images=st.session_state.reference_images
                     )
-
                     if success:
                         st.success(f"✅ 프로젝트 '{project_name}'이(가) 업데이트되었습니다!")
                     else:
                         st.error("프로젝트 업데이트 실패")
                 else:
-                    # Save as new project
                     project_path = pm.save_project(
                         project_name=project_name,
                         canvas_image=st.session_state.current_canvas_image,
-                        canvas_history=st.session_state.canvas_history,
+                        canvas_history=history_images,
                         reference_images=st.session_state.reference_images
                     )
 
@@ -545,8 +655,6 @@ def show_load_project_dialog():
 
     workspace_dir = st.session_state.user['workspace_dir']
     pm = ProjectManager(workspace_dir)
-
-    # List all projects
     projects = pm.list_projects()
 
     if not projects:
@@ -558,7 +666,6 @@ def show_load_project_dialog():
 
     st.caption(f"총 {len(projects)}개의 프로젝트")
 
-    # Show projects in grid
     for idx, project in enumerate(projects):
         with st.container():
             col_img, col_info, col_action = st.columns([1, 3, 1])
@@ -580,16 +687,24 @@ def show_load_project_dialog():
 
             with col_action:
                 if st.button("불러오기", key=f"load_{idx}", use_container_width=True):
-                    # Load project
                     project_data = pm.load_project(project['project_path'])
 
                     if project_data:
-                        # Update session state
                         st.session_state.current_canvas_image = project_data['canvas_image']
-                        st.session_state.canvas_history = project_data['canvas_history']
+
+                        # Convert old format to new format if needed
+                        st.session_state.canvas_history = []
+                        for i, img in enumerate(project_data['canvas_history']):
+                            st.session_state.canvas_history.append({
+                                'image': img,
+                                'title': f"복원된 이미지 #{i+1}",
+                                'created_at': project_data.get('modified_at', 'Unknown')
+                            })
+
                         st.session_state.reference_images = project_data['reference_images']
                         st.session_state.current_project_path = project_data['project_path']
                         st.session_state.current_project_name = project_data['name']
+                        st.session_state.history_counter = len(st.session_state.canvas_history)
 
                         st.success(f"✅ 프로젝트 '{project_data['name']}'을(를) 불러왔습니다!")
                         st.session_state.show_load_dialog = False
@@ -606,134 +721,44 @@ def show_load_project_dialog():
 
             st.markdown("---")
 
-    # Close button
     if st.button("닫기", use_container_width=True, key="load_close"):
         st.session_state.show_load_dialog = False
         st.rerun()
-
-
-@st.dialog("📦 DAM에 저장", width="large")
-def show_save_dam_dialog():
-    """Show DAM save dialog with metadata generation."""
-    st.markdown("### DAM에 이미지 저장")
-    st.caption("이미지를 DAM에 저장하고 AI가 자동으로 메타데이터를 생성합니다.")
-
-    # File name input
-    default_name = f"editor_output_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    file_name = st.text_input(
-        "파일명 (확장자 제외)",
-        value=default_name,
-        key="dam_file_name"
-    )
-
-    # Optional description
-    description = st.text_area(
-        "설명 (선택사항)",
-        placeholder="이 이미지에 대한 설명을 입력하세요...",
-        key="dam_description"
-    )
-
-    # AI metadata generation option
-    generate_metadata = st.checkbox(
-        "AI 메타데이터 자동 생성",
-        value=True,
-        key="dam_auto_metadata"
-    )
-
-    st.markdown("---")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("취소", use_container_width=True, key="dam_cancel"):
-            st.session_state.show_save_dam_dialog = False
-            st.rerun()
-
-    with col2:
-        if st.button("저장", type="primary", use_container_width=True, key="dam_confirm"):
-            if not file_name:
-                st.warning("파일명을 입력해주세요")
-            else:
-                try:
-                    workspace_dir = st.session_state.user['workspace_dir']
-                    generated_dir = os.path.join(workspace_dir, 'generated')
-                    os.makedirs(generated_dir, exist_ok=True)
-
-                    # Save image to generated folder
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    safe_name = "".join(c for c in file_name if c.isalnum() or c in (' ', '-', '_')).strip()
-                    output_path = os.path.join(generated_dir, f"{safe_name}_{timestamp}.png")
-
-                    st.session_state.current_canvas_image.save(output_path)
-
-                    # Generate metadata if requested
-                    if generate_metadata:
-                        with st.spinner("AI 메타데이터 생성 중..."):
-                            analyzer = ImageAnalyzer()
-                            metadata = analyzer.analyze_image_metadata(output_path)
-
-                            # Add user description if provided
-                            if description:
-                                metadata['description'] = description
-
-                            # Save metadata
-                            metadata_dir = os.path.join(workspace_dir, 'metadata')
-                            os.makedirs(metadata_dir, exist_ok=True)
-
-                            metadata_path = os.path.join(
-                                metadata_dir,
-                                f"{os.path.splitext(os.path.basename(output_path))[0]}.json"
-                            )
-
-                            import json
-                            with open(metadata_path, 'w', encoding='utf-8') as f:
-                                json.dump(metadata, f, ensure_ascii=False, indent=2)
-
-                            st.success(f"✅ DAM에 저장 완료! (메타데이터 포함)")
-                    else:
-                        st.success(f"✅ DAM에 저장 완료!")
-
-                    st.info(f"저장 경로: {output_path}")
-
-                    st.session_state.show_save_dam_dialog = False
-
-                    # Offer to open DAM
-                    if st.button("📦 DAM 시스템 열기", use_container_width=True):
-                        st.switch_page("pages/02_DAM_System.py")
-
-                except Exception as e:
-                    st.error(f"저장 실패: {str(e)}")
-                    st.exception(e)
 
 
 def main():
     """Main entry point for Image Editor page."""
     init_editor_state()
 
-    # Show save dialog if requested
+    # Show dialogs if requested
     if st.session_state.get('show_save_dialog', False):
         show_save_project_dialog()
 
-    # Show load dialog if requested
     if st.session_state.get('show_load_dialog', False):
         show_load_project_dialog()
 
-    # Show DAM save dialog if requested
-    if st.session_state.get('show_save_dam_dialog', False):
-        show_save_dam_dialog()
-
-    # Show current project name in title
+    # Show current project name
     if st.session_state.current_project_name:
         st.caption(f"📁 현재 프로젝트: {st.session_state.current_project_name}")
 
-    # Layout
-    col_menu, col_main, col_history = st.columns([1, 6, 2])
+    # Main layout: Left Menu | Tools + Canvas | History
+    # Adjust column ratio if template panel is open
+    if st.session_state.show_template_panel:
+        col_menu, col_template, col_main, col_history = st.columns([1, 1.5, 4, 2])
+    else:
+        col_menu, col_main, col_history = st.columns([1, 5, 2])
+        col_template = None
 
     with col_menu:
         show_left_menu()
 
+    if col_template:
+        with col_template:
+            show_template_panel()
+
     with col_main:
-        show_toolbar()
+        show_tool_cards()
+        st.markdown("---")
         show_canvas()
         show_prompt_area()
         show_reference_images()

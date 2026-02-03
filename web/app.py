@@ -87,7 +87,7 @@ def show_sidebar():
 
         # Copyright 정보
         st.sidebar.markdown("""
-        <div style='text-align: center; font-size: 1rem; color: #888; padding: 0.5rem 0;'>
+        <div style='text-align: center; font-size: 1rem; color: #9ca3af; padding: 0.5rem 0;'>
             Copyright © 2026<br>
             ITCEN CLOIT<br>
             All rights reserved.
@@ -123,8 +123,8 @@ def show_welcome_section():
     """Render welcome message and Create Now button."""
     st.markdown(f"""
     <div style='text-align: center; margin: 40px 0 60px 0;'>
-        <h1 style='color: #273444; margin-bottom: 8px;'>{st.session_state.user['name']} 님, 안녕하세요.</h1>
-        <p style='font-size: 18px; color: #666;'>무엇을 도와드릴까요?</p>
+        <h1 style='color: #FFFFFF; margin-bottom: 0;'>{st.session_state.user['name']} 님, 안녕하세요.</h1>
+        <p style='font-size: 18px; color: #FFFFFF; margin-top: 2px;'>무엇을 도와드릴까요?</p>
     </div>
     """, unsafe_allow_html=True)
 
